@@ -84,7 +84,7 @@ async def generate_table(user_input: str, job_id: str):
     return table_generator_response.choices[0].message.parsed.dict()
 
 
-def generate_row_header_subquestion(user_input: str, table_json: dict) -> str:
+async def generate_row_header_subquestion(user_input: str, table_json: dict) -> str:
     print("Generating Row Header Sub-Question")
 
     sub_question_generator_system_prompt = """
@@ -108,7 +108,7 @@ def generate_row_header_subquestion(user_input: str, table_json: dict) -> str:
     class SubQuestion(BaseModel):
         question: str = Field(description="The sub-question to find row headers")
 
-    sub_question_response = openai.beta.chat.completions.parse(
+    sub_question_response = await openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": sub_question_generator_system_prompt},
@@ -124,7 +124,7 @@ def generate_row_header_subquestion(user_input: str, table_json: dict) -> str:
 
     return sub_question_response.choices[0].message.parsed.question
 
-def generate_keywords(user_input: str, sub_question: str) -> List[str]:
+async def generate_keywords(user_input: str, sub_question: str) -> List[str]:
     keyword_generator_system_prompt = """
         Role: You are a professional Google search researcher.
         Task: Given a main user query for context and a specific sub-question, your primary task is to generate 5 unique Google search keywords that will help gather detailed information primarily related to the sub-question.
@@ -146,7 +146,7 @@ def generate_keywords(user_input: str, sub_question: str) -> List[str]:
 
     keyword_generator_user_prompt = f"Main query (for context): {user_input}\nSub-question (primary focus): {sub_question}\nPlease generate keywords primarily addressing the sub-question, while considering the main query as context."
 
-    keyword_generator_response = openai.beta.chat.completions.parse(
+    keyword_generator_response = await openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": keyword_generator_system_prompt},
@@ -157,29 +157,35 @@ def generate_keywords(user_input: str, sub_question: str) -> List[str]:
 
     return keyword_generator_response.choices[0].message.parsed.keywords
 
-def search_and_answer(search_term, job_id, table, sub_question):
+async def search_and_answer(search_term, job_id, table, sub_question):
     """Search the Web and obtain a list of web results."""
-    google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
-    urls = []
-    search_chunk = {}
-    for result in google_search_result["items"]:
-        urls.append(result["link"])
-    for url in urls:
+    loop = asyncio.get_event_loop()
+    google_search_result = await loop.run_in_executor(None, lambda: google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute())
+    urls = [result["link"] for result in google_search_result["items"]]
+    
+    async def fetch_url(url):
         search_url = f'https://r.jina.ai/{url}'
         headers = {
             "Authorization": f"Bearer {JINA_API_KEY}"
         }
         try:
-            response = requests.get(search_url, headers=headers)
-            if response.status_code == 200:
-              search_result = response.text
-              answer = analyse_result(search_result, table, sub_question, url)
-              if answer != "":
-                return answer
-            else:
-                print(f"Jina returned an error: {response.status_code} for URL: {url}")
-        except requests.exceptions.RequestException as e:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(search_url, headers=headers) as response:
+                    if response.status == 200:
+                        search_result = await response.text()
+                        return await analyse_result(search_result, table, sub_question, url)
+                    else:
+                        print(f"Jina returned an error: {response.status} for URL: {url}")
+        except Exception as e:
             print(f"Error fetching URL {url}: {str(e)}")
+        return ""
+
+    tasks = [fetch_url(url) for url in urls]
+    results = await asyncio.gather(*tasks)
+    
+    for result in results:
+        if result:
+            return result
     return ""
 
 async def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
