@@ -7,6 +7,8 @@ import json
 import os
 from IPython.display import display, Markdown
 import tiktoken
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 encoding = tiktoken.encoding_for_model("gpt-4o-mini")
 GOOGLE_API_KEY = "AIzaSyBiTmP3mKXTUb13BtpDivIDZ5X5KccFaqU"
@@ -17,7 +19,7 @@ google_search = build("customsearch", "v1", developerKey=GOOGLE_API_KEY).cse()
 JINA_API_KEY="jina_cdfde91597854ce89ef3daed22947239autBdM5UrHeOgwRczhd1JYzs51OH"
 openai = OpenAI(api_key="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")
 
-def generate_table(user_input: str, job_id: str):
+async def generate_table(user_input: str, job_id: str):
     print("Generating Table")
     table_generator_system_prompt = """
     Role: You are an expert researcher and critical thinker.
@@ -63,7 +65,7 @@ def generate_table(user_input: str, job_id: str):
         headers: TableHeaders = Field(description="Table headers")
         data: List[List[str]] = Field(description="Table data as 2D array of empty strings")
 
-    table_generator_response = openai.beta.chat.completions.parse(
+    table_generator_response = await openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": table_generator_system_prompt},
@@ -180,7 +182,7 @@ def search_and_answer(search_term, job_id, table, sub_question):
             print(f"Error fetching URL {url}: {str(e)}")
     return ""
 
-def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
+async def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
     print("Initializing Row Headers")
 
     # First, determine if we need to find headers
@@ -203,7 +205,7 @@ def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> di
         has_explicit_headers: str = Field(description="Whether headers are explicit in query")
         entities: List[str] = Field(description="List of explicit entities if any, empty list if none")
 
-    analysis_response = openai.beta.chat.completions.parse(
+    analysis_response = await openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": header_analyzer_system_prompt},
@@ -219,17 +221,17 @@ def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> di
         table_json["headers"]["rows"] = entities[:len(table_json["data"])]
     else:
         # Generate sub-question to find headers
-        header_question = generate_row_header_subquestion(user_input, table_json)
+        header_question = await generate_row_header_subquestion(user_input, table_json)
         print(f"Generated sub-question: {header_question}")
 
         # Generate keywords using existing function
-        header_keywords = generate_keywords(user_input, header_question)
+        header_keywords = await generate_keywords(user_input, header_question)
 
         # Search and analyze results using existing function
-        for keyword in header_keywords:
-            print(f"Searching with keyword: {keyword}")
-            result = search_and_answer(keyword, job_id, table_json, header_question)
+        tasks = [search_and_answer(keyword, job_id, table_json, header_question) for keyword in header_keywords]
+        results = await asyncio.gather(*tasks)
 
+        for result in results:
             if result:
                 # Parse the result and update the table
                 entities_parser_prompt = """
@@ -245,7 +247,7 @@ def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> di
                 class EntitiesExtraction(BaseModel):
                     entities: List[str] = Field(description="List of extracted entity names")
 
-                entities_response = openai.beta.chat.completions.parse(
+                entities_response = await openai.beta.chat.completions.parse(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": entities_parser_prompt},
@@ -366,49 +368,55 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
-    print("Processing empty cells one by one")
+async def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
+    print("Processing empty cells in parallel")
 
-    while True:
-        # Find first empty cell
-        empty_cell = find_first_empty_cell(table_json)
-        if empty_cell is None:
-            print("No more empty cells - table is complete")
-            break
-
-        row_idx, col_idx = empty_cell
+    async def process_cell(row_idx: int, col_idx: int):
         row_header = table_json["headers"]["rows"][row_idx]
         col_header = table_json["headers"]["columns"][col_idx]
 
         print(f"Processing cell: {row_header} x {col_header}")
 
         # Generate sub-question for the cell
-        sub_question = generate_cell_subquestion(row_header, col_header, table_json)
+        sub_question = await generate_cell_subquestion(row_header, col_header, table_json)
         print(f"Generated sub-question: {sub_question}")
 
         # Try to find an answer with one set of keywords
-        answer_found = False
-        keywords = generate_keywords(user_input, sub_question)
+        keywords = await generate_keywords(user_input, sub_question)
         print(f"Keywords: {keywords}")
 
-        for keyword in keywords:
-            result = search_and_answer(keyword, job_id, table_json, sub_question)
+        tasks = [search_and_answer(keyword, job_id, table_json, sub_question) for keyword in keywords]
+        results = await asyncio.gather(*tasks)
+
+        for result in results:
             if result:
                 print(f"Found answer: {result}")
-                # Update the cell with the found value
-                table_json = update_cell_value(table_json, row_idx, col_idx, result)
-                answer_found = True
-                break
+                return result
 
-        if not answer_found:
-            print(f"No answer found, marking cell with 'X'")
-            table_json = update_cell_value(table_json, row_idx, col_idx, "X")
+        print(f"No answer found, marking cell with 'X'")
+        return "X"
 
-        # Save the updated table after each cell update
-        with open(f"jobs/{job_id}/table.json", "w") as f:
-            json.dump(table_json, f, indent=2)
+    empty_cells = find_all_empty_cells(table_json)
+    tasks = [process_cell(row_idx, col_idx) for row_idx, col_idx in empty_cells]
+    results = await asyncio.gather(*tasks)
+
+    for (row_idx, col_idx), result in zip(empty_cells, results):
+        table_json = update_cell_value(table_json, row_idx, col_idx, result)
+
+    # Save the updated table after processing all cells
+    with open(f"jobs/{job_id}/table.json", "w") as f:
+        json.dump(table_json, f, indent=2)
 
     return table_json
+
+def find_all_empty_cells(table_json: dict) -> List[Tuple[int, int]]:
+    """Find all empty cells in the table, returns list of (row_index, col_index) tuples."""
+    empty_cells = []
+    for row_idx, row in enumerate(table_json["data"]):
+        for col_idx, cell in enumerate(row):
+            if cell == "":
+                empty_cells.append((row_idx, col_idx))
+    return empty_cells
 
 user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
 job_id = "1001"
@@ -416,13 +424,16 @@ initial_table = generate_table(user_input, job_id)
 updated_table = initialize_row_headers(user_input, initial_table, job_id)
 completed_table = process_empty_cells(user_input, updated_table, job_id)
 
-def display_final_table(table_json: dict, format_type: str = "markdown"):
+def display_final_table(table_json: dict, format_type: str = "markdown") -> str:
     """
-    Display the final table in either markdown or formatted text.
+    Generate the final table in either markdown or formatted text.
 
     Args:
         table_json: The completed table in JSON format
         format_type: Either "markdown" or "text"
+
+    Returns:
+        str: The formatted table as a string
     """
     if format_type == "markdown":
         # Create markdown table
@@ -434,7 +445,7 @@ def display_final_table(table_json: dict, format_type: str = "markdown"):
             row_data = [row_header] + table_json["data"][row_idx]
             markdown += "| " + " | ".join(str(cell) for cell in row_data) + " |\n"
 
-        display(Markdown(markdown))
+        return markdown
 
     else:  # text format
         # Calculate column widths
@@ -456,17 +467,19 @@ def display_final_table(table_json: dict, format_type: str = "markdown"):
         # Combine all widths
         col_widths = [row_header_width] + data_widths
 
-        # Print headers
+        # Generate headers
         header_row = "".join(f"{header:<{col_widths[i]+2}}"
                            for i, header in enumerate(col_headers))
-        print(header_row)
-        print("-" * len(header_row))
+        text_table = header_row + "\n"
+        text_table += "-" * len(header_row) + "\n"
 
-        # Print data rows
+        # Generate data rows
         for row_idx, row_header in enumerate(row_headers):
             row_data = [row_header] + table_json["data"][row_idx]
-            print("".join(f"{str(cell):<{col_widths[i]+2}}"
-                        for i, cell in enumerate(row_data)))
+            text_table += "".join(f"{str(cell):<{col_widths[i]+2}}"
+                        for i, cell in enumerate(row_data)) + "\n"
+
+        return text_table
 
 def save_final_table(table_json: dict, job_id: str):
     """Save the final table in both markdown and text formats"""
