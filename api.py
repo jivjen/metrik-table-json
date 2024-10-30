@@ -24,19 +24,21 @@ async def run_job(job_id: str, user_input: str):
         logger.info("Generating initial table...")
         initial_table = await generate_table(user_input, job_id)
         jobs[job_id]["result"] = initial_table
+        jobs[job_id]["status"] = "initial_table_generated"
         logger.info("Initial table generated")
         
         logger.info("Initializing row headers...")
         updated_table = await initialize_row_headers(user_input, initial_table, job_id)
         jobs[job_id]["result"] = updated_table
+        jobs[job_id]["status"] = "row_headers_initialized"
         logger.info("Row headers initialized")
         
         logger.info("Processing empty cells...")
         completed_table = await process_empty_cells(user_input, updated_table, job_id)
         jobs[job_id]["result"] = completed_table
+        jobs[job_id]["status"] = "completed"
         logger.info("Empty cells processed")
         
-        jobs[job_id]["status"] = "completed"
         logger.info(f"Job {job_id} completed")
     except Exception as e:
         logger.error(f"Error in job {job_id}: {str(e)}")

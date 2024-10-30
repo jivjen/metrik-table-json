@@ -197,8 +197,18 @@ async def search_and_answer(search_term, job_id, table, sub_question):
     logger = logging.getLogger(f"job_{job_id}")
     logger.info(f"Searching for: {search_term}")
     loop = asyncio.get_event_loop()
-    google_search_result = await loop.run_in_executor(None, lambda: google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute())
-    urls = [result["link"] for result in google_search_result["items"]]
+    try:
+        google_search_result = await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()),
+            timeout=30  # 30 seconds timeout
+        )
+        urls = [result["link"] for result in google_search_result["items"]]
+    except asyncio.TimeoutError:
+        logger.error(f"Google search timed out for: {search_term}")
+        return ""
+    except Exception as e:
+        logger.error(f"Error during Google search for {search_term}: {str(e)}")
+        return ""
     
     async def fetch_url(url):
         search_url = f'https://r.jina.ai/{url}'
@@ -418,35 +428,44 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str) ->
     logger.info("Processing empty cells in parallel")
 
     async def process_cell(row_idx: int, col_idx: int):
-        row_header = table_json["headers"]["rows"][row_idx]
-        col_header = table_json["headers"]["columns"][col_idx]
+        try:
+            row_header = table_json["headers"]["rows"][row_idx]
+            col_header = table_json["headers"]["columns"][col_idx]
 
-        logger.info(f"Processing cell: {row_header} x {col_header}")
+            logger.info(f"Processing cell: {row_header} x {col_header}")
 
-        # Generate sub-question for the cell
-        sub_question = await generate_cell_subquestion(row_header, col_header, table_json)
-        logger.info(f"Generated sub-question: {sub_question}")
+            # Generate sub-question for the cell
+            sub_question = await generate_cell_subquestion(row_header, col_header, table_json)
+            logger.info(f"Generated sub-question: {sub_question}")
 
-        # Try to find an answer with one set of keywords
-        keywords = await generate_keywords(user_input, sub_question, job_id)
-        logger.info(f"Keywords: {keywords}")
+            # Try to find an answer with one set of keywords
+            keywords = await generate_keywords(user_input, sub_question, job_id)
+            logger.info(f"Keywords: {keywords}")
 
-        tasks = [search_and_answer(keyword, job_id, table_json, sub_question) for keyword in keywords]
-        results = await asyncio.gather(*tasks)
+            tasks = [search_and_answer(keyword, job_id, table_json, sub_question) for keyword in keywords]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for result in results:
-            if result:
-                logger.info(f"Found answer: {result}")
-                return result
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error(f"Error processing cell {row_header} x {col_header}: {str(result)}")
+                elif result:
+                    logger.info(f"Found answer: {result}")
+                    return result
 
-        logger.info(f"No answer found, marking cell with 'X'")
-        return "X"
+            logger.info(f"No answer found, marking cell with 'X'")
+            return "X"
+        except Exception as e:
+            logger.error(f"Error processing cell {row_idx} x {col_idx}: {str(e)}")
+            return "Error"
 
     empty_cells = find_all_empty_cells(table_json)
     tasks = [process_cell(row_idx, col_idx) for row_idx, col_idx in empty_cells]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for (row_idx, col_idx), result in zip(empty_cells, results):
+        if isinstance(result, Exception):
+            logger.error(f"Error processing cell {row_idx} x {col_idx}: {str(result)}")
+            result = "Error"
         table_json = update_cell_value(table_json, row_idx, col_idx, result)
 
     # Save the updated table after processing all cells
