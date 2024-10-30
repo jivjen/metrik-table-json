@@ -22,18 +22,21 @@ async def run_job(job_id: str, user_input: str):
     
     try:
         logger.info("Generating initial table...")
+        jobs[job_id]["status"] = "generating_initial_table"
         initial_table = await generate_table(user_input, job_id)
         jobs[job_id]["result"] = initial_table
         jobs[job_id]["status"] = "initial_table_generated"
         logger.info("Initial table generated")
         
         logger.info("Initializing row headers...")
+        jobs[job_id]["status"] = "initializing_row_headers"
         updated_table = await initialize_row_headers(user_input, initial_table, job_id)
         jobs[job_id]["result"] = updated_table
         jobs[job_id]["status"] = "row_headers_initialized"
         logger.info("Row headers initialized")
         
         logger.info("Processing empty cells...")
+        jobs[job_id]["status"] = "processing_empty_cells"
         completed_table = await process_empty_cells(user_input, updated_table, job_id)
         jobs[job_id]["result"] = completed_table
         jobs[job_id]["status"] = "completed"
@@ -62,10 +65,18 @@ async def poll_status(job_id: str):
     job = jobs[job_id]
     markdown_table = ""
     
-    if job["result"]:
+    if job["result"] and job["status"] == "completed":
         markdown_table = display_final_table(job["result"], "markdown")
     
-    return JobStatus(status=job["status"], result={"table": markdown_table, **job["result"]})
+    return JobStatus(
+        status=job["status"],
+        result={
+            "table": markdown_table,
+            "progress": job.get("progress", 0),
+            "current_step": job.get("current_step", ""),
+            **job["result"]
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
