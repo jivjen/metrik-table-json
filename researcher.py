@@ -198,11 +198,14 @@ async def search_and_answer(search_term, job_id, table, sub_question):
     logger.info(f"Searching for: {search_term}")
     loop = asyncio.get_event_loop()
     try:
+        logger.info("Starting Google search")
         google_search_result = await asyncio.wait_for(
             loop.run_in_executor(None, lambda: google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()),
             timeout=30  # 30 seconds timeout
         )
+        logger.info("Google search completed")
         urls = [result["link"] for result in google_search_result["items"]]
+        logger.info(f"Found {len(urls)} URLs")
     except asyncio.TimeoutError:
         logger.error(f"Google search timed out for: {search_term}")
         return ""
@@ -210,17 +213,24 @@ async def search_and_answer(search_term, job_id, table, sub_question):
         logger.error(f"Error during Google search for {search_term}: {str(e)}")
         return ""
     
+    logger.info("Starting URL fetching")
+    
     async def fetch_url(url):
         search_url = f'https://r.jina.ai/{url}'
         headers = {
             "Authorization": f"Bearer {JINA_API_KEY}"
         }
         try:
+            logger.info(f"Fetching URL: {url}")
             async with aiohttp.ClientSession() as session:
                 async with session.get(search_url, headers=headers) as response:
                     if response.status == 200:
+                        logger.info(f"Successfully fetched URL: {url}")
                         search_result = await response.text()
-                        return await analyse_result(search_result, table, sub_question, url)
+                        logger.info(f"Analyzing result for URL: {url}")
+                        result = await analyse_result(search_result, table, sub_question, url)
+                        logger.info(f"Analysis complete for URL: {url}")
+                        return result
                     else:
                         logger.error(f"Jina returned an error: {response.status} for URL: {url}")
                         return ""  # Return empty string on error
