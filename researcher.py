@@ -140,7 +140,7 @@ async def generate_row_header_subquestion(user_input: str, table_json: dict, job
     class SubQuestion(BaseModel):
         question: str = Field(description="The sub-question to find row headers")
 
-    sub_question_response = await openai.beta.chat.completions.parse(
+    sub_question_response = openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": sub_question_generator_system_prompt},
