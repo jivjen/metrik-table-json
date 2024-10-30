@@ -96,7 +96,7 @@ async def generate_table(user_input: str, job_id: str):
         headers: TableHeaders = Field(description="Table headers")
         data: List[List[str]] = Field(description="Table data as 2D array of empty strings")
 
-    table_generator_response = await openai.beta.chat.completions.parse(
+    table_generator_response = openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": table_generator_system_prompt},
