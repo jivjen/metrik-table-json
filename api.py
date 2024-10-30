@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import asyncio
 from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
+import logging
 
 app = FastAPI()
 
@@ -17,23 +18,37 @@ jobs: Dict[str, Dict[str, Any]] = {}
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
+    print(f"Starting job {job_id} with user input: {user_input}")
     logger.info(f"Starting job {job_id} with user input: {user_input}")
     jobs[job_id]["status"] = "running"
     
-    initial_table = await generate_table(user_input, job_id)
-    jobs[job_id]["result"] = initial_table
-    logger.info("Initial table generated")
-    
-    updated_table = await initialize_row_headers(user_input, initial_table, job_id)
-    jobs[job_id]["result"] = updated_table
-    logger.info("Row headers initialized")
-    
-    completed_table = await process_empty_cells(user_input, updated_table, job_id)
-    jobs[job_id]["result"] = completed_table
-    logger.info("Empty cells processed")
-    
-    jobs[job_id]["status"] = "completed"
-    logger.info(f"Job {job_id} completed")
+    try:
+        print("Generating initial table...")
+        initial_table = await generate_table(user_input, job_id)
+        jobs[job_id]["result"] = initial_table
+        print("Initial table generated")
+        logger.info("Initial table generated")
+        
+        print("Initializing row headers...")
+        updated_table = await initialize_row_headers(user_input, initial_table, job_id)
+        jobs[job_id]["result"] = updated_table
+        print("Row headers initialized")
+        logger.info("Row headers initialized")
+        
+        print("Processing empty cells...")
+        completed_table = await process_empty_cells(user_input, updated_table, job_id)
+        jobs[job_id]["result"] = completed_table
+        print("Empty cells processed")
+        logger.info("Empty cells processed")
+        
+        jobs[job_id]["status"] = "completed"
+        print(f"Job {job_id} completed")
+        logger.info(f"Job {job_id} completed")
+    except Exception as e:
+        print(f"Error in job {job_id}: {str(e)}")
+        logger.error(f"Error in job {job_id}: {str(e)}")
+        jobs[job_id]["status"] = "error"
+        jobs[job_id]["error"] = str(e)
 
 @app.post("/start_job")
 async def start_job(job_input: JobInput):
@@ -57,4 +72,5 @@ async def poll_status(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+    logging.basicConfig(level=logging.INFO)
     uvicorn.run(app, host="0.0.0.0", port=8000)
