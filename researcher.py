@@ -180,7 +180,7 @@ async def generate_keywords(user_input: str, sub_question: str, job_id: str) -> 
 
     keyword_generator_user_prompt = f"Main query (for context): {user_input}\nSub-question (primary focus): {sub_question}\nPlease generate keywords primarily addressing the sub-question, while considering the main query as context."
 
-    keyword_generator_response = await openai.beta.chat.completions.parse(
+    keyword_generator_response = openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": keyword_generator_system_prompt},

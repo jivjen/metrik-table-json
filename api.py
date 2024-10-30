@@ -54,7 +54,9 @@ async def run_job(job_id: str, user_input: str):
 async def start_job(job_input: JobInput):
     job_id = str(len(jobs) + 1)
     jobs[job_id] = {"status": "starting", "result": {}}
+    # Create a task to run the job asynchronously
     asyncio.create_task(run_job(job_id, job_input.user_input))
+    # Immediately return the job_id without waiting for the job to complete
     return {"job_id": job_id}
 
 @app.get("/poll_status/{job_id}")
