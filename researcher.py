@@ -213,9 +213,10 @@ async def search_and_answer(search_term, job_id, table, sub_question):
                         return await analyse_result(search_result, table, sub_question, url)
                     else:
                         logger.error(f"Jina returned an error: {response.status} for URL: {url}")
+                        return ""  # Return empty string on error
         except Exception as e:
             logger.error(f"Error fetching URL {url}: {str(e)}")
-        return ""
+            return ""  # Return empty string on exception
 
     tasks = [fetch_url(url) for url in urls]
     results = await asyncio.gather(*tasks)
