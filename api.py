@@ -1,9 +1,6 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from pydantic import BaseModel
 import asyncio
-import json
-import os
-import logging
 from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 

@@ -449,11 +449,21 @@ def find_all_empty_cells(table_json: dict) -> List[Tuple[int, int]]:
                 empty_cells.append((row_idx, col_idx))
     return empty_cells
 
-user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
-job_id = "1001"
-initial_table = generate_table(user_input, job_id)
-updated_table = initialize_row_headers(user_input, initial_table, job_id)
-completed_table = process_empty_cells(user_input, updated_table, job_id)
+async def main():
+    user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
+    job_id = "1001"
+    initial_table = await generate_table(user_input, job_id)
+    updated_table = await initialize_row_headers(user_input, initial_table, job_id)
+    completed_table = await process_empty_cells(user_input, updated_table, job_id)
+    
+    print("\nMarkdown Format:")
+    print(display_final_table(completed_table, "markdown"))
+    
+    print("\nText Format:")
+    print(display_final_table(completed_table, "text"))
+    
+    # Save to files
+    save_final_table(completed_table, job_id)
 
 def display_final_table(table_json: dict, format_type: str = "markdown") -> str:
     """
@@ -556,12 +566,6 @@ def save_final_table(table_json: dict, job_id: str):
             f.write("".join(f"{str(cell):<{col_widths[i]+2}}"
                           for i, cell in enumerate(row_data)) + "\n")
 
-# Usage:
-print("\nMarkdown Format:")
-display_final_table(completed_table, "markdown")
-
-print("\nText Format:")
-display_final_table(completed_table, "text")
-
-# Save to files
-save_final_table(completed_table, job_id)
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
