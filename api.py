@@ -4,8 +4,6 @@ import asyncio
 from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 import logging
-from concurrent.futures import ThreadPoolExecutor
-
 app = FastAPI()
 
 class JobInput(BaseModel):
@@ -16,7 +14,6 @@ class JobStatus(BaseModel):
     result: Dict[str, Any]
 
 jobs: Dict[str, Dict[str, Any]] = {}
-executor = ThreadPoolExecutor(max_workers=5)  # Adjust the number of workers as needed
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
@@ -50,9 +47,8 @@ async def run_job(job_id: str, user_input: str):
 async def start_job(job_input: JobInput):
     job_id = str(len(jobs) + 1)
     jobs[job_id] = {"status": "starting", "result": {}}
-    # Run the job in a separate thread
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(executor, asyncio.run, run_job(job_id, job_input.user_input))
+    # Run the job in the background
+    asyncio.create_task(run_job(job_id, job_input.user_input))
     # Immediately return the job_id without waiting for the job to complete
     return {"job_id": job_id}
 

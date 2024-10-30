@@ -9,7 +9,6 @@ from IPython.display import display, Markdown
 import tiktoken
 import asyncio
 import aiohttp
-from concurrent.futures import ThreadPoolExecutor
 import logging
 from datetime import datetime
 
@@ -309,7 +308,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str)
     return table_json
 
 
-def analyse_result(search_result: str, markdown_table: str, sub_question: str, url: str) -> List[str]:
+async def analyse_result(search_result: str, markdown_table: str, sub_question: str, url: str) -> str:
   tokens = encoding.encode(search_result)
 
   # Define the chunk size
