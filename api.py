@@ -4,6 +4,7 @@ import asyncio
 from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 app = FastAPI()
 
@@ -15,37 +16,32 @@ class JobStatus(BaseModel):
     result: Dict[str, Any]
 
 jobs: Dict[str, Dict[str, Any]] = {}
+executor = ThreadPoolExecutor(max_workers=5)  # Adjust the number of workers as needed
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
-    print(f"Starting job {job_id} with user input: {user_input}")
     logger.info(f"Starting job {job_id} with user input: {user_input}")
     jobs[job_id]["status"] = "running"
     
     try:
-        print("Generating initial table...")
+        logger.info("Generating initial table...")
         initial_table = await generate_table(user_input, job_id)
         jobs[job_id]["result"] = initial_table
-        print("Initial table generated")
         logger.info("Initial table generated")
         
-        print("Initializing row headers...")
+        logger.info("Initializing row headers...")
         updated_table = await initialize_row_headers(user_input, initial_table, job_id)
         jobs[job_id]["result"] = updated_table
-        print("Row headers initialized")
         logger.info("Row headers initialized")
         
-        print("Processing empty cells...")
+        logger.info("Processing empty cells...")
         completed_table = await process_empty_cells(user_input, updated_table, job_id)
         jobs[job_id]["result"] = completed_table
-        print("Empty cells processed")
         logger.info("Empty cells processed")
         
         jobs[job_id]["status"] = "completed"
-        print(f"Job {job_id} completed")
         logger.info(f"Job {job_id} completed")
     except Exception as e:
-        print(f"Error in job {job_id}: {str(e)}")
         logger.error(f"Error in job {job_id}: {str(e)}")
         jobs[job_id]["status"] = "error"
         jobs[job_id]["error"] = str(e)
@@ -54,8 +50,9 @@ async def run_job(job_id: str, user_input: str):
 async def start_job(job_input: JobInput):
     job_id = str(len(jobs) + 1)
     jobs[job_id] = {"status": "starting", "result": {}}
-    # Create a task to run the job asynchronously
-    asyncio.create_task(run_job(job_id, job_input.user_input))
+    # Run the job in a separate thread
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, asyncio.run, run_job(job_id, job_input.user_input))
     # Immediately return the job_id without waiting for the job to complete
     return {"job_id": job_id}
 

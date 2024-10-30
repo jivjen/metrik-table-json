@@ -213,9 +213,9 @@ async def search_and_answer(search_term, job_id, table, sub_question):
                         search_result = await response.text()
                         return await analyse_result(search_result, table, sub_question, url)
                     else:
-                        print(f"Jina returned an error: {response.status} for URL: {url}")
+                        logger.error(f"Jina returned an error: {response.status} for URL: {url}")
         except Exception as e:
-            print(f"Error fetching URL {url}: {str(e)}")
+            logger.error(f"Error fetching URL {url}: {str(e)}")
         return ""
 
     tasks = [fetch_url(url) for url in urls]
