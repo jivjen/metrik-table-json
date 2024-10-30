@@ -8,6 +8,7 @@ import os
 from IPython.display import display, Markdown
 import tiktoken
 import asyncio
+import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import logging
 from datetime import datetime
