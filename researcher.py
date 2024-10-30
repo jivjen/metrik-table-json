@@ -583,4 +583,7 @@ def save_final_table(table_json: dict, job_id: str):
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nExecution interrupted by user")

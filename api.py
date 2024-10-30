@@ -67,5 +67,15 @@ async def poll_status(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
+    import asyncio
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    async def run_server():
+        config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        print("\nServer stopped by user")
