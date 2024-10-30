@@ -265,7 +265,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str)
         table_json["headers"]["rows"] = entities[:len(table_json["data"])]
     else:
         # Generate sub-question to find headers
-        header_question = await generate_row_header_subquestion(user_input, table_json)
+        header_question = await generate_row_header_subquestion(user_input, table_json, job_id)
         logger.info(f"Generated sub-question: {header_question}")
 
         # Generate keywords using existing function
