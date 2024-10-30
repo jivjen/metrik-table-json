@@ -249,7 +249,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str)
         has_explicit_headers: str = Field(description="Whether headers are explicit in query")
         entities: List[str] = Field(description="List of explicit entities if any, empty list if none")
 
-    analysis_response = await openai.beta.chat.completions.parse(
+    analysis_response = openai.beta.chat.completions.parse(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": header_analyzer_system_prompt},
