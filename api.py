@@ -3,8 +3,9 @@ from pydantic import BaseModel
 import asyncio
 import json
 import os
+import logging
 from typing import Dict, Any
-from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table
+from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 
 app = FastAPI()
 
@@ -18,18 +19,24 @@ class JobStatus(BaseModel):
 jobs: Dict[str, Dict[str, Any]] = {}
 
 async def run_job(job_id: str, user_input: str):
+    logger = setup_logging(job_id)
+    logger.info(f"Starting job {job_id} with user input: {user_input}")
     jobs[job_id]["status"] = "running"
     
     initial_table = await generate_table(user_input, job_id)
     jobs[job_id]["result"] = initial_table
+    logger.info("Initial table generated")
     
     updated_table = await initialize_row_headers(user_input, initial_table, job_id)
     jobs[job_id]["result"] = updated_table
+    logger.info("Row headers initialized")
     
     completed_table = await process_empty_cells(user_input, updated_table, job_id)
     jobs[job_id]["result"] = completed_table
+    logger.info("Empty cells processed")
     
     jobs[job_id]["status"] = "completed"
+    logger.info(f"Job {job_id} completed")
 
 @app.post("/start_job")
 async def start_job(job_input: JobInput):

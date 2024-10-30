@@ -9,6 +9,8 @@ from IPython.display import display, Markdown
 import tiktoken
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import logging
+from datetime import datetime
 
 encoding = tiktoken.encoding_for_model("gpt-4o-mini")
 GOOGLE_API_KEY = "AIzaSyBiTmP3mKXTUb13BtpDivIDZ5X5KccFaqU"
@@ -19,8 +21,23 @@ google_search = build("customsearch", "v1", developerKey=GOOGLE_API_KEY).cse()
 JINA_API_KEY="jina_cdfde91597854ce89ef3daed22947239autBdM5UrHeOgwRczhd1JYzs51OH"
 openai = OpenAI(api_key="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")
 
+def setup_logging(job_id: str):
+    log_dir = f"jobs/{job_id}"
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = f"{log_dir}/job_{job_id}.log"
+    
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    return logging.getLogger(f"job_{job_id}")
+
 async def generate_table(user_input: str, job_id: str):
-    print("Generating Table")
+    logger = setup_logging(job_id)
+    logger.info(f"User Input: {user_input}")
+    logger.info("Generating Table")
     table_generator_system_prompt = """
     Role: You are an expert researcher and critical thinker.
     Task: Your task is to analyze the user's input and create a hypothetical table that would contain all the required information from the user query.
@@ -78,14 +95,15 @@ async def generate_table(user_input: str, job_id: str):
     with open(f"jobs/{job_id}/table.json", "w") as f:
         json.dump(table_generator_response.choices[0].message.parsed.dict(), f, indent=2)
 
-    print("Table")
-    print(json.dumps(table_generator_response.choices[0].message.parsed.dict(), indent=2))
+    logger.info("Table Generated")
+    logger.info(json.dumps(table_generator_response.choices[0].message.parsed.dict(), indent=2))
 
     return table_generator_response.choices[0].message.parsed.dict()
 
 
-async def generate_row_header_subquestion(user_input: str, table_json: dict) -> str:
-    print("Generating Row Header Sub-Question")
+async def generate_row_header_subquestion(user_input: str, table_json: dict, job_id: str) -> str:
+    logger = logging.getLogger(f"job_{job_id}")
+    logger.info("Generating Row Header Sub-Question")
 
     sub_question_generator_system_prompt = """
     Role: You are an expert researcher and critical thinker.
@@ -124,7 +142,8 @@ async def generate_row_header_subquestion(user_input: str, table_json: dict) -> 
 
     return sub_question_response.choices[0].message.parsed.question
 
-async def generate_keywords(user_input: str, sub_question: str) -> List[str]:
+async def generate_keywords(user_input: str, sub_question: str, job_id: str) -> List[str]:
+    logger = logging.getLogger(f"job_{job_id}")
     keyword_generator_system_prompt = """
         Role: You are a professional Google search researcher.
         Task: Given a main user query for context and a specific sub-question, your primary task is to generate 5 unique Google search keywords that will help gather detailed information primarily related to the sub-question.
@@ -155,10 +174,14 @@ async def generate_keywords(user_input: str, sub_question: str) -> List[str]:
         response_format=KeywordGeneration
     )
 
-    return keyword_generator_response.choices[0].message.parsed.keywords
+    keywords = keyword_generator_response.choices[0].message.parsed.keywords
+    logger.info(f"Generated keywords: {keywords}")
+    return keywords
 
 async def search_and_answer(search_term, job_id, table, sub_question):
     """Search the Web and obtain a list of web results."""
+    logger = logging.getLogger(f"job_{job_id}")
+    logger.info(f"Searching for: {search_term}")
     loop = asyncio.get_event_loop()
     google_search_result = await loop.run_in_executor(None, lambda: google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute())
     urls = [result["link"] for result in google_search_result["items"]]
@@ -189,7 +212,8 @@ async def search_and_answer(search_term, job_id, table, sub_question):
     return ""
 
 async def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
-    print("Initializing Row Headers")
+    logger = logging.getLogger(f"job_{job_id}")
+    logger.info("Initializing Row Headers")
 
     # First, determine if we need to find headers
     header_analyzer_system_prompt = """
@@ -228,10 +252,10 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str)
     else:
         # Generate sub-question to find headers
         header_question = await generate_row_header_subquestion(user_input, table_json)
-        print(f"Generated sub-question: {header_question}")
+        logger.info(f"Generated sub-question: {header_question}")
 
         # Generate keywords using existing function
-        header_keywords = await generate_keywords(user_input, header_question)
+        header_keywords = await generate_keywords(user_input, header_question, job_id)
 
         # Search and analyze results using existing function
         tasks = [search_and_answer(keyword, job_id, table_json, header_question) for keyword in header_keywords]
@@ -375,31 +399,32 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     return table_json
 
 async def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
-    print("Processing empty cells in parallel")
+    logger = logging.getLogger(f"job_{job_id}")
+    logger.info("Processing empty cells in parallel")
 
     async def process_cell(row_idx: int, col_idx: int):
         row_header = table_json["headers"]["rows"][row_idx]
         col_header = table_json["headers"]["columns"][col_idx]
 
-        print(f"Processing cell: {row_header} x {col_header}")
+        logger.info(f"Processing cell: {row_header} x {col_header}")
 
         # Generate sub-question for the cell
         sub_question = await generate_cell_subquestion(row_header, col_header, table_json)
-        print(f"Generated sub-question: {sub_question}")
+        logger.info(f"Generated sub-question: {sub_question}")
 
         # Try to find an answer with one set of keywords
-        keywords = await generate_keywords(user_input, sub_question)
-        print(f"Keywords: {keywords}")
+        keywords = await generate_keywords(user_input, sub_question, job_id)
+        logger.info(f"Keywords: {keywords}")
 
         tasks = [search_and_answer(keyword, job_id, table_json, sub_question) for keyword in keywords]
         results = await asyncio.gather(*tasks)
 
         for result in results:
             if result:
-                print(f"Found answer: {result}")
+                logger.info(f"Found answer: {result}")
                 return result
 
-        print(f"No answer found, marking cell with 'X'")
+        logger.info(f"No answer found, marking cell with 'X'")
         return "X"
 
     empty_cells = find_all_empty_cells(table_json)
