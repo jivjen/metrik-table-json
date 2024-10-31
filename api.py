@@ -1,14 +1,12 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from pydantic import BaseModel
 import asyncio
 from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 import logging
-from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 
 app = FastAPI()
-executor = ThreadPoolExecutor(max_workers=4)  # Adjust the number of workers as needed
 
 class JobInput(BaseModel):
     user_input: str
@@ -18,6 +16,13 @@ class JobStatus(BaseModel):
     result: Dict[str, Any]
 
 jobs: Dict[str, Dict[str, Any]] = {}
+job_queue = asyncio.Queue()
+
+async def job_worker():
+    while True:
+        job_id, user_input = await job_queue.get()
+        await run_job(job_id, user_input)
+        job_queue.task_done()
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
@@ -53,12 +58,10 @@ async def run_job(job_id: str, user_input: str):
         jobs[job_id]["error"] = str(e)
 
 @app.post("/start_job")
-async def start_job(job_input: JobInput, background_tasks: BackgroundTasks):
+async def start_job(job_input: JobInput):
     job_id = str(len(jobs) + 1)
-    jobs[job_id] = {"status": "starting", "result": {}}
-    # Run the job in the background
-    background_tasks.add_task(run_job, job_id, job_input.user_input)
-    # Immediately return the job_id without waiting for the job to complete
+    jobs[job_id] = {"status": "queued", "result": {}}
+    await job_queue.put((job_id, job_input.user_input))
     return {"job_id": job_id}
 
 @app.get("/poll_status/{job_id}")
@@ -70,7 +73,7 @@ async def poll_status(job_id: str):
     markdown_table = ""
     
     if job["result"] and job["status"] == "completed":
-        markdown_table = await asyncio.to_thread(display_final_table, job["result"], "markdown")
+        markdown_table = display_final_table(job["result"], "markdown")
     
     return JobStatus(
         status=job["status"],
@@ -82,6 +85,10 @@ async def poll_status(job_id: str):
         }
     )
 
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(job_worker())
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, workers=4, log_level="info")
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, workers=1, log_level="info")
