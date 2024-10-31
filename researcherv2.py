@@ -447,13 +447,13 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
     logger.info("Finished processing all cells")
     return table_json
 
-async def process_job(user_input: str, job_id: str):
+def process_job(user_input: str, job_id: str):
     logger = setup_job_logger(job_id)
     logger.info(f"Starting job {job_id} with user input: {user_input}")
     
     initial_table = generate_table(user_input, job_id, logger)
-    updated_table = await initialize_row_headers(user_input, initial_table, job_id, logger)
-    completed_table = await process_empty_cells(user_input, updated_table, job_id, logger)
+    updated_table = asyncio.run(initialize_row_headers(user_input, initial_table, job_id, logger))
+    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger))
     
     logger.info(f"Job {job_id} completed")
     logger.info(f"Final table: {json.dumps(completed_table, indent=2)}")
