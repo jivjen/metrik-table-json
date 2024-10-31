@@ -9,6 +9,8 @@ from IPython.display import display, Markdown
 import tiktoken
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
+import aiohttp
+import logging
 
 encoding = tiktoken.encoding_for_model("gpt-4o-mini")
 GOOGLE_API_KEY = "AIzaSyBiTmP3mKXTUb13BtpDivIDZ5X5KccFaqU"
@@ -18,6 +20,9 @@ google_search = build("customsearch", "v1", developerKey=GOOGLE_API_KEY).cse()
 
 JINA_API_KEY="jina_cdfde91597854ce89ef3daed22947239autBdM5UrHeOgwRczhd1JYzs51OH"
 openai = OpenAI(api_key="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")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def generate_table(user_input: str, job_id: str):
     print("Generating Table")
@@ -157,29 +162,44 @@ def generate_keywords(user_input: str, sub_question: str) -> List[str]:
 
     return keyword_generator_response.choices[0].message.parsed.keywords
 
-def search_and_answer(search_term, job_id, table, sub_question):
+async def search_and_answer(search_term, job_id, table, sub_question):
     """Search the Web and obtain a list of web results."""
+    logger.info(f"Searching for: {search_term}")
     google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
-    urls = []
-    search_chunk = {}
-    for result in google_search_result["items"]:
-        urls.append(result["link"])
-    for url in urls:
-        search_url = f'https://r.jina.ai/{url}'
-        headers = {
-            "Authorization": f"Bearer {JINA_API_KEY}"
-        }
-        try:
-            response = requests.get(search_url, headers=headers)
-            if response.status_code == 200:
-              search_result = response.text
-              answer = analyse_result(search_result, table, sub_question, url)
-              if answer != "":
-                return answer
+    urls = [result["link"] for result in google_search_result.get("items", [])]
+    
+    async with aiohttp.ClientSession() as session:
+        tasks = []
+        for url in urls:
+            search_url = f'https://r.jina.ai/{url}'
+            headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
+            task = asyncio.create_task(fetch_and_analyze(session, search_url, headers, table, sub_question, url))
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks)
+        
+        for result in results:
+            if result:
+                return result
+    
+    logger.info(f"No answer found for: {search_term}")
+    return ""
+
+async def fetch_and_analyze(session, url, headers, table, sub_question, original_url):
+    try:
+        async with session.get(url, headers=headers, timeout=10) as response:
+            if response.status == 200:
+                search_result = await response.text()
+                answer = analyse_result(search_result, table, sub_question, original_url)
+                if answer:
+                    logger.info(f"Answer found: {answer}")
+                    return answer
             else:
-                print(f"Jina returned an error: {response.status_code} for URL: {url}")
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching URL {url}: {str(e)}")
+                logger.warning(f"Jina returned an error: {response.status} for URL: {original_url}")
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout fetching URL {original_url}")
+    except Exception as e:
+        logger.error(f"Error fetching URL {original_url}: {str(e)}")
     return ""
 
 def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
@@ -372,48 +392,45 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     row_header = table_json["headers"]["rows"][row_idx]
     col_header = table_json["headers"]["columns"][col_idx]
 
-    print(f"Processing cell: {row_header} x {col_header}")
+    logger.info(f"Processing cell: {row_header} x {col_header}")
 
     sub_question = generate_cell_subquestion(row_header, col_header, table_json)
-    print(f"Generated sub-question: {sub_question}")
+    logger.info(f"Generated sub-question: {sub_question}")
 
     keywords = generate_keywords(user_input, sub_question)
-    print(f"Keywords: {keywords}")
+    logger.info(f"Keywords: {keywords}")
 
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(search_and_answer, keyword, job_id, table_json, sub_question) for keyword in keywords]
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                print(f"Found answer: {result}")
-                # Cancel all other tasks
-                for f in futures:
-                    if not f.done():
-                        f.cancel()
-                return row_idx, col_idx, result
+    tasks = [search_and_answer(keyword, job_id, table_json, sub_question) for keyword in keywords]
+    results = await asyncio.gather(*tasks)
 
-    print(f"No answer found, marking cell with 'X'")
+    for result in results:
+        if result:
+            logger.info(f"Found answer: {result}")
+            return row_idx, col_idx, result
+
+    logger.info(f"No answer found, marking cell with 'X'")
     return row_idx, col_idx, "X"
 
 async def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
-    print("Processing empty cells in parallel")
+    logger.info("Processing empty cells in parallel")
 
     empty_cells = find_all_empty_cells(table_json)
     if not empty_cells:
-        print("No empty cells - table is complete")
+        logger.info("No empty cells - table is complete")
         return table_json
 
-    async with asyncio.TaskGroup() as tg:
-        tasks = [tg.create_task(process_cell(row_idx, col_idx, user_input, table_json, job_id)) for row_idx, col_idx in empty_cells]
+    tasks = [process_cell(row_idx, col_idx, user_input, table_json, job_id) for row_idx, col_idx in empty_cells]
+    results = await asyncio.gather(*tasks)
 
-    for task in tasks:
-        row_idx, col_idx, result = task.result()
+    for row_idx, col_idx, result in results:
         table_json = update_cell_value(table_json, row_idx, col_idx, result)
+        logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
 
     # Save the updated table after processing all cells
     with open(f"jobs/{job_id}/table.json", "w") as f:
         json.dump(table_json, f, indent=2)
 
+    logger.info("Finished processing all cells")
     return table_json
 
 async def main():
