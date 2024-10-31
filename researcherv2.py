@@ -325,13 +325,14 @@ def analyse_result(search_result: str, markdown_table: str, sub_question: str, u
 
   return ""
 
-def find_first_empty_cell(table_json: dict) -> Optional[Tuple[int, int]]:
-    """Find the first empty cell in the table, returns (row_index, col_index) or None if no empty cells."""
+def find_all_empty_cells(table_json: dict) -> List[Tuple[int, int]]:
+    """Find all empty cells in the table, returns a list of (row_index, col_index) tuples."""
+    empty_cells = []
     for row_idx, row in enumerate(table_json["data"]):
         for col_idx, cell in enumerate(row):
             if cell == "":
-                return (row_idx, col_idx)
-    return None
+                empty_cells.append((row_idx, col_idx))
+    return empty_cells
 
 def generate_cell_subquestion(row_header: str, col_header: str, table_json: dict) -> str:
     """Generate a sub-question for a specific cell based on its headers."""
@@ -365,52 +366,61 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
-    print("Processing empty cells one by one")
+async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str) -> Tuple[int, int, str]:
+    row_header = table_json["headers"]["rows"][row_idx]
+    col_header = table_json["headers"]["columns"][col_idx]
 
-    while True:
-        # Find first empty cell
-        empty_cell = find_first_empty_cell(table_json)
-        if empty_cell is None:
-            print("No more empty cells - table is complete")
-            break
+    print(f"Processing cell: {row_header} x {col_header}")
 
-        row_idx, col_idx = empty_cell
-        row_header = table_json["headers"]["rows"][row_idx]
-        col_header = table_json["headers"]["columns"][col_idx]
+    sub_question = generate_cell_subquestion(row_header, col_header, table_json)
+    print(f"Generated sub-question: {sub_question}")
 
-        print(f"Processing cell: {row_header} x {col_header}")
+    keywords = generate_keywords(user_input, sub_question)
+    print(f"Keywords: {keywords}")
 
-        # Generate sub-question for the cell
-        sub_question = generate_cell_subquestion(row_header, col_header, table_json)
-        print(f"Generated sub-question: {sub_question}")
-
-        # Try to find an answer with one set of keywords
-        answer_found = False
-        keywords = generate_keywords(user_input, sub_question)
-        print(f"Keywords: {keywords}")
-
-        for keyword in keywords:
-            result = search_and_answer(keyword, job_id, table_json, sub_question)
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(search_and_answer, keyword, job_id, table_json, sub_question) for keyword in keywords]
+        for future in as_completed(futures):
+            result = future.result()
             if result:
                 print(f"Found answer: {result}")
-                # Update the cell with the found value
-                table_json = update_cell_value(table_json, row_idx, col_idx, result)
-                answer_found = True
-                break
+                # Cancel all other tasks
+                for f in futures:
+                    if not f.done():
+                        f.cancel()
+                return row_idx, col_idx, result
 
-        if not answer_found:
-            print(f"No answer found, marking cell with 'X'")
-            table_json = update_cell_value(table_json, row_idx, col_idx, "X")
+    print(f"No answer found, marking cell with 'X'")
+    return row_idx, col_idx, "X"
 
-        # Save the updated table after each cell update
-        with open(f"jobs/{job_id}/table.json", "w") as f:
-            json.dump(table_json, f, indent=2)
+async def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
+    print("Processing empty cells in parallel")
+
+    empty_cells = find_all_empty_cells(table_json)
+    if not empty_cells:
+        print("No empty cells - table is complete")
+        return table_json
+
+    async with asyncio.TaskGroup() as tg:
+        tasks = [tg.create_task(process_cell(row_idx, col_idx, user_input, table_json, job_id)) for row_idx, col_idx in empty_cells]
+
+    for task in tasks:
+        row_idx, col_idx, result = task.result()
+        table_json = update_cell_value(table_json, row_idx, col_idx, result)
+
+    # Save the updated table after processing all cells
+    with open(f"jobs/{job_id}/table.json", "w") as f:
+        json.dump(table_json, f, indent=2)
 
     return table_json
 
-user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
-job_id = "1001"
-initial_table = generate_table(user_input, job_id)
-updated_table = initialize_row_headers(user_input, initial_table, job_id)
-completed_table = process_empty_cells(user_input, updated_table, job_id)
+async def main():
+    user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
+    job_id = "1001"
+    initial_table = generate_table(user_input, job_id)
+    updated_table = initialize_row_headers(user_input, initial_table, job_id)
+    completed_table = await process_empty_cells(user_input, updated_table, job_id)
+    return completed_table
+
+if __name__ == "__main__":
+    asyncio.run(main())
