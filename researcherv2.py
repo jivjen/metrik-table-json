@@ -198,7 +198,7 @@ async def fetch_and_analyze(session, url, table, sub_question):
         logger.error(f"Error fetching URL {url}: {str(e)}")
     return ""
 
-def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
+async def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
     print("Initializing Row Headers")
 
     # First, determine if we need to find headers
@@ -246,7 +246,7 @@ def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> di
         # Search and analyze results using existing function
         for keyword in header_keywords:
             print(f"Searching with keyword: {keyword}")
-            result = search_and_answer(keyword, job_id, table_json, header_question)
+            result = await search_and_answer(keyword, job_id, table_json, header_question)
 
             if result:
                 # Parse the result and update the table
@@ -385,8 +385,12 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     return table_json
 
 async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str) -> Tuple[int, int, str]:
-    row_header = table_json["headers"]["rows"][row_idx]
-    col_header = table_json["headers"]["columns"][col_idx]
+    try:
+        row_header = table_json["headers"]["rows"][row_idx]
+        col_header = table_json["headers"]["columns"][col_idx]
+    except IndexError:
+        logger.error(f"Index out of range for row {row_idx} or column {col_idx}")
+        return row_idx, col_idx, "Error"
 
     logger.info(f"Processing cell: {row_header} x {col_header}")
 
@@ -433,7 +437,7 @@ async def main():
     user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
     job_id = "1001"
     initial_table = generate_table(user_input, job_id)
-    updated_table = initialize_row_headers(user_input, initial_table, job_id)
+    updated_table = await initialize_row_headers(user_input, initial_table, job_id)
     completed_table = await process_empty_cells(user_input, updated_table, job_id)
     return completed_table
 
