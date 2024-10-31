@@ -156,7 +156,7 @@ async def generate_row_header_subquestion(user_input: str, table_json: dict, job
 
     return sub_question_response.choices[0].message.parsed.question
 
-async def generate_keywords(user_input: str, sub_question: str, job_id: str) -> List[str]:
+def generate_keywords(user_input: str, sub_question: str, job_id: str) -> List[str]:
     logger = logging.getLogger(f"job_{job_id}")
     keyword_generator_system_prompt = """
         Role: You are a professional Google search researcher.
@@ -192,56 +192,46 @@ async def generate_keywords(user_input: str, sub_question: str, job_id: str) -> 
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question):
+def search_and_answer(search_term, job_id, table, sub_question):
     """Search the Web and obtain a list of web results."""
     logger = logging.getLogger(f"job_{job_id}")
     logger.info(f"Searching for: {search_term}")
-    loop = asyncio.get_event_loop()
     try:
         logger.info("Starting Google search")
-        google_search_result = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()),
-            timeout=30  # 30 seconds timeout
-        )
+        google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
         logger.info("Google search completed")
         urls = [result["link"] for result in google_search_result["items"]]
         logger.info(f"Found {len(urls)} URLs")
-    except asyncio.TimeoutError:
-        logger.error(f"Google search timed out for: {search_term}")
-        return ""
     except Exception as e:
         logger.error(f"Error during Google search for {search_term}: {str(e)}")
         return ""
     
     logger.info("Starting URL fetching")
     
-    async def fetch_url(url):
+    def fetch_url(url):
         search_url = f'https://r.jina.ai/{url}'
         headers = {
             "Authorization": f"Bearer {JINA_API_KEY}"
         }
         try:
             logger.info(f"Fetching URL: {url}")
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, headers=headers) as response:
-                    if response.status == 200:
-                        logger.info(f"Successfully fetched URL: {url}")
-                        search_result = await response.text()
-                        logger.info(f"Analyzing result for URL: {url}")
-                        result = await analyse_result(search_result, table, sub_question, url)
-                        logger.info(f"Analysis complete for URL: {url}")
-                        return result
-                    else:
-                        logger.error(f"Jina returned an error: {response.status} for URL: {url}")
-                        return ""  # Return empty string on error
+            response = requests.get(search_url, headers=headers)
+            if response.status_code == 200:
+                logger.info(f"Successfully fetched URL: {url}")
+                search_result = response.text
+                logger.info(f"Analyzing result for URL: {url}")
+                result = analyse_result(search_result, table, sub_question, url)
+                logger.info(f"Analysis complete for URL: {url}")
+                return result
+            else:
+                logger.error(f"Jina returned an error: {response.status_code} for URL: {url}")
+                return ""  # Return empty string on error
         except Exception as e:
             logger.error(f"Error fetching URL {url}: {str(e)}")
             return ""  # Return empty string on exception
 
-    tasks = [fetch_url(url) for url in urls]
-    results = await asyncio.gather(*tasks)
-    
-    for result in results:
+    for url in urls:
+        result = fetch_url(url)
         if result:
             return result
     return ""
@@ -433,11 +423,11 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-async def process_empty_cells(user_input: str, table_json: dict, job_id: str, update_callback: Callable[[dict], None]) -> dict:
+def process_empty_cells(user_input: str, table_json: dict, job_id: str, update_callback: Callable[[dict], None]) -> dict:
     logger = logging.getLogger(f"job_{job_id}")
     logger.info("Processing empty cells")
 
-    async def process_cell(row_idx: int, col_idx: int):
+    def process_cell(row_idx: int, col_idx: int):
         try:
             row_header = table_json["headers"]["rows"][row_idx]
             col_header = table_json["headers"]["columns"][col_idx]
@@ -447,11 +437,11 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, up
             sub_question = generate_cell_subquestion(row_header, col_header, table_json)
             logger.info(f"Generated sub-question: {sub_question}")
 
-            keywords = await generate_keywords(user_input, sub_question, job_id)
+            keywords = generate_keywords(user_input, sub_question, job_id)
             logger.info(f"Keywords: {keywords}")
 
             for keyword in keywords:
-                result = await search_and_answer(keyword, job_id, table_json, sub_question)
+                result = search_and_answer(keyword, job_id, table_json, sub_question)
                 if result:
                     logger.info(f"Found answer: {result}")
                     return result
@@ -466,20 +456,12 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, up
     total_cells = len(empty_cells)
     processed_cells = 0
 
-    semaphore = asyncio.Semaphore(5)  # Limit concurrent tasks to 5
-
-    async def process_cell_with_semaphore(row_idx: int, col_idx: int):
-        async with semaphore:
-            result = await process_cell(row_idx, col_idx)
-            nonlocal processed_cells
-            processed_cells += 1
-            progress = int((processed_cells / total_cells) * 100)
-            update_callback({"progress": progress, "table_json": table_json})
-            return result
-
     for row_idx, col_idx in empty_cells:
-        result = await process_cell_with_semaphore(row_idx, col_idx)
+        result = process_cell(row_idx, col_idx)
         table_json = update_cell_value(table_json, row_idx, col_idx, result)
+        processed_cells += 1
+        progress = int((processed_cells / total_cells) * 100)
+        update_callback({"progress": progress, "table_json": table_json})
 
     return table_json
 

@@ -110,26 +110,21 @@ async def run_job(job_id: str, user_input: str):
     
     def update_job_status(update):
         jobs[job_id].update(update)
+        logger.info(f"Job {job_id} status updated: {update}")
     
     try:
         async with asyncio.timeout(3600):  # 1 hour timeout
-            logger.info("Generating initial table...")
             update_job_status({"status": "generating_initial_table", "current_step": "Generating initial table", "progress": 10})
-            initial_table = await generate_table(user_input, job_id)
+            initial_table = await asyncio.to_thread(generate_table, user_input, job_id)
             update_job_status({"result": initial_table, "status": "initial_table_generated", "progress": 30})
-            logger.info("Initial table generated")
             
-            logger.info("Initializing row headers...")
             update_job_status({"status": "initializing_row_headers", "current_step": "Initializing row headers", "progress": 50})
-            updated_table = await initialize_row_headers(user_input, initial_table, job_id)
+            updated_table = await asyncio.to_thread(initialize_row_headers, user_input, initial_table, job_id)
             update_job_status({"result": updated_table, "status": "row_headers_initialized", "progress": 70})
-            logger.info("Row headers initialized")
             
-            logger.info("Processing empty cells...")
             update_job_status({"status": "processing_empty_cells", "current_step": "Processing empty cells", "progress": 80})
-            completed_table = await process_empty_cells(user_input, updated_table, job_id, update_job_status)
+            completed_table = await asyncio.to_thread(process_empty_cells, user_input, updated_table, job_id, update_job_status)
             update_job_status({"result": completed_table, "status": "completed", "progress": 100, "current_step": "Completed"})
-            logger.info("Empty cells processed")
             
             logger.info(f"Job {job_id} completed")
     except asyncio.TimeoutError:
