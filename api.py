@@ -5,6 +5,7 @@ from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 import logging
 from concurrent.futures import ThreadPoolExecutor
+import uvicorn
 
 app = FastAPI()
 executor = ThreadPoolExecutor(max_workers=4)  # Adjust the number of workers as needed
@@ -69,9 +70,7 @@ async def poll_status(job_id: str):
     markdown_table = ""
     
     if job["result"] and job["status"] == "completed":
-        markdown_table = await asyncio.get_event_loop().run_in_executor(
-            executor, display_final_table, job["result"], "markdown"
-        )
+        markdown_table = await asyncio.to_thread(display_final_table, job["result"], "markdown")
     
     return JobStatus(
         status=job["status"],
@@ -84,7 +83,5 @@ async def poll_status(job_id: str):
     )
 
 if __name__ == "__main__":
-    import uvicorn
     logging.basicConfig(level=logging.INFO)
-    
-    uvicorn.run(app, host="0.0.0.0", port=8000, workers=4)
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, workers=4, log_level="info")
