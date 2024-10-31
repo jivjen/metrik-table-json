@@ -192,13 +192,14 @@ def generate_keywords(user_input: str, sub_question: str, job_id: str) -> List[s
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-def search_and_answer(search_term, job_id, table, sub_question):
+async def search_and_answer(search_term, job_id, table, sub_question):
     """Search the Web and obtain a list of web results."""
     logger = logging.getLogger(f"job_{job_id}")
     logger.info(f"Searching for: {search_term}")
     try:
         logger.info("Starting Google search")
-        google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
+        google_search_result = await asyncio.to_thread(google_search.list, q=search_term, cx=GOOGLE_CSE_ID)
+        google_search_result = await asyncio.to_thread(google_search_result.execute)
         logger.info("Google search completed")
         urls = [result["link"] for result in google_search_result["items"]]
         logger.info(f"Found {len(urls)} URLs")
@@ -208,30 +209,31 @@ def search_and_answer(search_term, job_id, table, sub_question):
     
     logger.info("Starting URL fetching")
     
-    def fetch_url(url):
+    async def fetch_url(url):
         search_url = f'https://r.jina.ai/{url}'
         headers = {
             "Authorization": f"Bearer {JINA_API_KEY}"
         }
         try:
             logger.info(f"Fetching URL: {url}")
-            response = requests.get(search_url, headers=headers)
-            if response.status_code == 200:
-                logger.info(f"Successfully fetched URL: {url}")
-                search_result = response.text
-                logger.info(f"Analyzing result for URL: {url}")
-                result = analyse_result(search_result, table, sub_question, url)
-                logger.info(f"Analysis complete for URL: {url}")
-                return result
-            else:
-                logger.error(f"Jina returned an error: {response.status_code} for URL: {url}")
-                return ""  # Return empty string on error
+            async with aiohttp.ClientSession() as session:
+                async with session.get(search_url, headers=headers) as response:
+                    if response.status == 200:
+                        logger.info(f"Successfully fetched URL: {url}")
+                        search_result = await response.text()
+                        logger.info(f"Analyzing result for URL: {url}")
+                        result = await analyse_result(search_result, table, sub_question, url)
+                        logger.info(f"Analysis complete for URL: {url}")
+                        return result
+                    else:
+                        logger.error(f"Jina returned an error: {response.status} for URL: {url}")
+                        return ""  # Return empty string on error
         except Exception as e:
             logger.error(f"Error fetching URL {url}: {str(e)}")
             return ""  # Return empty string on exception
 
     for url in urls:
-        result = fetch_url(url)
+        result = await fetch_url(url)
         if result:
             return result
     return ""
@@ -369,7 +371,7 @@ async def analyse_result(search_result: str, markdown_table: str, sub_question: 
         subQuestionAnswered: str = Field(description = "Answer found for the question or not")
         result: str = Field(description="The answer to the sub-question")
 
-    search_analysis_response = openai.beta.chat.completions.parse(
+    search_analysis_response = await openai.beta.chat.completions.parse(
           model="gpt-4o-mini",
           messages=[
               {"role": "system", "content": search_analyser_system_prompt},
@@ -423,11 +425,11 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-def process_empty_cells(user_input: str, table_json: dict, job_id: str, update_callback: Callable[[dict], None]) -> dict:
+async def process_empty_cells(user_input: str, table_json: dict, job_id: str, update_callback: Callable[[dict], None]) -> dict:
     logger = logging.getLogger(f"job_{job_id}")
     logger.info("Processing empty cells")
 
-    def process_cell(row_idx: int, col_idx: int):
+    async def process_cell(row_idx: int, col_idx: int):
         try:
             row_header = table_json["headers"]["rows"][row_idx]
             col_header = table_json["headers"]["columns"][col_idx]
@@ -441,7 +443,7 @@ def process_empty_cells(user_input: str, table_json: dict, job_id: str, update_c
             logger.info(f"Keywords: {keywords}")
 
             for keyword in keywords:
-                result = search_and_answer(keyword, job_id, table_json, sub_question)
+                result = await search_and_answer(keyword, job_id, table_json, sub_question)
                 if result:
                     logger.info(f"Found answer: {result}")
                     return result
@@ -457,7 +459,7 @@ def process_empty_cells(user_input: str, table_json: dict, job_id: str, update_c
     processed_cells = 0
 
     for row_idx, col_idx in empty_cells:
-        result = process_cell(row_idx, col_idx)
+        result = await process_cell(row_idx, col_idx)
         table_json = update_cell_value(table_json, row_idx, col_idx, result)
         processed_cells += 1
         progress = int((processed_cells / total_cells) * 100)
