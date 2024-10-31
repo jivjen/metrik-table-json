@@ -20,9 +20,17 @@ job_queue = asyncio.Queue()
 
 async def job_worker():
     while True:
-        job_id, user_input = await job_queue.get()
-        await run_job(job_id, user_input)
-        job_queue.task_done()
+        try:
+            job_id, user_input = await asyncio.wait_for(job_queue.get(), timeout=1.0)
+            await run_job(job_id, user_input)
+        except asyncio.TimeoutError:
+            continue
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logging.error(f"Unexpected error in job_worker: {str(e)}")
+        finally:
+            job_queue.task_done()
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
@@ -30,28 +38,33 @@ async def run_job(job_id: str, user_input: str):
     jobs[job_id]["status"] = "running"
     
     try:
-        logger.info("Generating initial table...")
-        jobs[job_id]["status"] = "generating_initial_table"
-        initial_table = await generate_table(user_input, job_id)
-        jobs[job_id]["result"] = initial_table
-        jobs[job_id]["status"] = "initial_table_generated"
-        logger.info("Initial table generated")
-        
-        logger.info("Initializing row headers...")
-        jobs[job_id]["status"] = "initializing_row_headers"
-        updated_table = await initialize_row_headers(user_input, initial_table, job_id)
-        jobs[job_id]["result"] = updated_table
-        jobs[job_id]["status"] = "row_headers_initialized"
-        logger.info("Row headers initialized")
-        
-        logger.info("Processing empty cells...")
-        jobs[job_id]["status"] = "processing_empty_cells"
-        completed_table = await process_empty_cells(user_input, updated_table, job_id)
-        jobs[job_id]["result"] = completed_table
-        jobs[job_id]["status"] = "completed"
-        logger.info("Empty cells processed")
-        
-        logger.info(f"Job {job_id} completed")
+        async with asyncio.timeout(3600):  # 1 hour timeout
+            logger.info("Generating initial table...")
+            jobs[job_id]["status"] = "generating_initial_table"
+            initial_table = await generate_table(user_input, job_id)
+            jobs[job_id]["result"] = initial_table
+            jobs[job_id]["status"] = "initial_table_generated"
+            logger.info("Initial table generated")
+            
+            logger.info("Initializing row headers...")
+            jobs[job_id]["status"] = "initializing_row_headers"
+            updated_table = await initialize_row_headers(user_input, initial_table, job_id)
+            jobs[job_id]["result"] = updated_table
+            jobs[job_id]["status"] = "row_headers_initialized"
+            logger.info("Row headers initialized")
+            
+            logger.info("Processing empty cells...")
+            jobs[job_id]["status"] = "processing_empty_cells"
+            completed_table = await process_empty_cells(user_input, updated_table, job_id)
+            jobs[job_id]["result"] = completed_table
+            jobs[job_id]["status"] = "completed"
+            logger.info("Empty cells processed")
+            
+            logger.info(f"Job {job_id} completed")
+    except asyncio.TimeoutError:
+        logger.error(f"Job {job_id} timed out after 1 hour")
+        jobs[job_id]["status"] = "timeout"
+        jobs[job_id]["error"] = "Job timed out after 1 hour"
     except Exception as e:
         logger.error(f"Error in job {job_id}: {str(e)}")
         jobs[job_id]["status"] = "error"
@@ -85,9 +98,21 @@ async def poll_status(job_id: str):
         }
     )
 
+worker_task = None
+
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(job_worker())
+    global worker_task
+    worker_task = asyncio.create_task(job_worker())
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    if worker_task:
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
