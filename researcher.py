@@ -445,7 +445,7 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str) ->
             logger.info(f"Processing cell: {row_header} x {col_header}")
 
             # Generate sub-question for the cell
-            sub_question = await generate_cell_subquestion(row_header, col_header, table_json)
+            sub_question = generate_cell_subquestion(row_header, col_header, table_json)
             logger.info(f"Generated sub-question: {sub_question}")
 
             # Try to find an answer with one set of keywords
@@ -469,24 +469,27 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str) ->
             return "Error"
 
     empty_cells = find_all_empty_cells(table_json)
-    semaphore = asyncio.Semaphore(10)  # Limit concurrent tasks to 10
+    semaphore = asyncio.Semaphore(5)  # Reduce concurrent tasks to 5
 
     async def process_cell_with_semaphore(row_idx: int, col_idx: int):
         async with semaphore:
             return await process_cell(row_idx, col_idx)
 
-    tasks = [process_cell_with_semaphore(row_idx, col_idx) for row_idx, col_idx in empty_cells]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    chunk_size = 5
+    for i in range(0, len(empty_cells), chunk_size):
+        chunk = empty_cells[i:i+chunk_size]
+        tasks = [process_cell_with_semaphore(row_idx, col_idx) for row_idx, col_idx in chunk]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    for (row_idx, col_idx), result in zip(empty_cells, results):
-        if isinstance(result, Exception):
-            logger.error(f"Error processing cell {row_idx} x {col_idx}: {str(result)}")
-            result = "Error"
-        table_json = update_cell_value(table_json, row_idx, col_idx, result)
+        for (row_idx, col_idx), result in zip(chunk, results):
+            if isinstance(result, Exception):
+                logger.error(f"Error processing cell {row_idx} x {col_idx}: {str(result)}")
+                result = "Error"
+            table_json = update_cell_value(table_json, row_idx, col_idx, result)
 
-    # Save the updated table after processing all cells
-    with open(f"jobs/{job_id}/table.json", "w") as f:
-        json.dump(table_json, f, indent=2)
+        # Save the updated table after processing each chunk
+        with open(f"jobs/{job_id}/table.json", "w") as f:
+            json.dump(table_json, f, indent=2)
 
     return table_json
 
