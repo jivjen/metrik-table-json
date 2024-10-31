@@ -93,68 +93,51 @@ async def poll_status(job_id: str):
         return {"error": "Job not found"}
     
     job = jobs[job_id]
-    markdown_table = ""
-    
-    if job["result"] and job["status"] == "completed":
-        markdown_table = display_final_table(job["result"], "markdown")
     
     return JobStatus(
         status=job["status"],
         result={
-            "table": markdown_table,
+            "table_json": job.get("result", {}),
             "progress": job.get("progress", 0),
             "current_step": job.get("current_step", ""),
-            **job["result"]
         }
     )
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
     logger.info(f"Starting job {job_id} with user input: {user_input}")
-    jobs[job_id]["status"] = "running"
+    jobs[job_id] = {"status": "running", "result": {}, "progress": 0, "current_step": "Starting"}
+    
+    def update_job_status(update):
+        jobs[job_id].update(update)
     
     try:
         async with asyncio.timeout(3600):  # 1 hour timeout
             logger.info("Generating initial table...")
-            jobs[job_id]["status"] = "generating_initial_table"
-            jobs[job_id]["current_step"] = "Generating initial table"
-            jobs[job_id]["progress"] = 10
+            update_job_status({"status": "generating_initial_table", "current_step": "Generating initial table", "progress": 10})
             initial_table = await generate_table(user_input, job_id)
-            jobs[job_id]["result"] = initial_table
-            jobs[job_id]["status"] = "initial_table_generated"
-            jobs[job_id]["progress"] = 30
+            update_job_status({"result": initial_table, "status": "initial_table_generated", "progress": 30})
             logger.info("Initial table generated")
             
             logger.info("Initializing row headers...")
-            jobs[job_id]["status"] = "initializing_row_headers"
-            jobs[job_id]["current_step"] = "Initializing row headers"
-            jobs[job_id]["progress"] = 50
+            update_job_status({"status": "initializing_row_headers", "current_step": "Initializing row headers", "progress": 50})
             updated_table = await initialize_row_headers(user_input, initial_table, job_id)
-            jobs[job_id]["result"] = updated_table
-            jobs[job_id]["status"] = "row_headers_initialized"
-            jobs[job_id]["progress"] = 70
+            update_job_status({"result": updated_table, "status": "row_headers_initialized", "progress": 70})
             logger.info("Row headers initialized")
             
             logger.info("Processing empty cells...")
-            jobs[job_id]["status"] = "processing_empty_cells"
-            jobs[job_id]["current_step"] = "Processing empty cells"
-            jobs[job_id]["progress"] = 80
-            completed_table = await process_empty_cells(user_input, updated_table, job_id)
-            jobs[job_id]["result"] = completed_table
-            jobs[job_id]["status"] = "completed"
-            jobs[job_id]["progress"] = 100
-            jobs[job_id]["current_step"] = "Completed"
+            update_job_status({"status": "processing_empty_cells", "current_step": "Processing empty cells", "progress": 80})
+            completed_table = await process_empty_cells(user_input, updated_table, job_id, update_job_status)
+            update_job_status({"result": completed_table, "status": "completed", "progress": 100, "current_step": "Completed"})
             logger.info("Empty cells processed")
             
             logger.info(f"Job {job_id} completed")
     except asyncio.TimeoutError:
         logger.error(f"Job {job_id} timed out after 1 hour")
-        jobs[job_id]["status"] = "timeout"
-        jobs[job_id]["error"] = "Job timed out after 1 hour"
+        update_job_status({"status": "timeout", "error": "Job timed out after 1 hour"})
     except Exception as e:
         logger.error(f"Error in job {job_id}: {str(e)}")
-        jobs[job_id]["status"] = "error"
-        jobs[job_id]["error"] = str(e)
+        update_job_status({"status": "error", "error": str(e)})
 
 worker_task = None
 
