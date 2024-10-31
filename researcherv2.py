@@ -5,12 +5,12 @@ from googleapiclient.discovery import build
 import requests
 import json
 import os
-from IPython.display import display, Markdown
-import tiktoken
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import asyncio
 import aiohttp
 import logging
+import tiktoken
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from filelock import FileLock
 
 encoding = tiktoken.encoding_for_model("gpt-4o-mini")
 GOOGLE_API_KEY = "AIzaSyBiTmP3mKXTUb13BtpDivIDZ5X5KccFaqU"
@@ -21,11 +21,16 @@ google_search = build("customsearch", "v1", developerKey=GOOGLE_API_KEY).cse()
 JINA_API_KEY="jina_cdfde91597854ce89ef3daed22947239autBdM5UrHeOgwRczhd1JYzs51OH"
 openai = OpenAI(api_key="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")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+def setup_job_logger(job_id: str):
+    logger = logging.getLogger(f"job_{job_id}")
+    logger.setLevel(logging.INFO)
+    file_handler = logging.FileHandler(f"jobs/{job_id}/job.log")
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    return logger
 
-def generate_table(user_input: str, job_id: str):
-    print("Generating Table")
+def generate_table(user_input: str, job_id: str, logger):
+    logger.info("Generating Table")
     table_generator_system_prompt = """
     Role: You are an expert researcher and critical thinker.
     Task: Your task is to analyze the user's input and create a hypothetical table that would contain all the required information from the user query.
@@ -83,14 +88,14 @@ def generate_table(user_input: str, job_id: str):
     with open(f"jobs/{job_id}/table.json", "w") as f:
         json.dump(table_generator_response.choices[0].message.parsed.dict(), f, indent=2)
 
-    print("Table")
-    print(json.dumps(table_generator_response.choices[0].message.parsed.dict(), indent=2))
+    logger.info("Table generated")
+    logger.info(json.dumps(table_generator_response.choices[0].message.parsed.dict(), indent=2))
 
     return table_generator_response.choices[0].message.parsed.dict()
 
 
-def generate_row_header_subquestion(user_input: str, table_json: dict) -> str:
-    print("Generating Row Header Sub-Question")
+def generate_row_header_subquestion(user_input: str, table_json: dict, logger) -> str:
+    logger.info("Generating Row Header Sub-Question")
 
     sub_question_generator_system_prompt = """
     Role: You are an expert researcher and critical thinker.
@@ -162,7 +167,7 @@ def generate_keywords(user_input: str, sub_question: str) -> List[str]:
 
     return keyword_generator_response.choices[0].message.parsed.keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question):
+async def search_and_answer(search_term, job_id, table, sub_question, logger):
     """Search the Web and obtain a list of web results."""
     logger.info(f"Searching for: {search_term}")
     google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
@@ -198,8 +203,8 @@ async def fetch_and_analyze(session, url, table, sub_question):
         logger.error(f"Error fetching URL {url}: {str(e)}")
     return ""
 
-async def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
-    print("Initializing Row Headers")
+async def initialize_row_headers(user_input: str, table_json: dict, job_id: str, logger) -> dict:
+    logger.info("Initializing Row Headers")
 
     # First, determine if we need to find headers
     header_analyzer_system_prompt = """
@@ -238,15 +243,15 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str)
     else:
         # Generate sub-question to find headers
         header_question = generate_row_header_subquestion(user_input, table_json)
-        print(f"Generated sub-question: {header_question}")
+        logger.info(f"Generated sub-question: {header_question}")
 
         # Generate keywords using existing function
         header_keywords = generate_keywords(user_input, header_question)
 
         # Search and analyze results using existing function
         for keyword in header_keywords:
-            print(f"Searching with keyword: {keyword}")
-            result = await search_and_answer(keyword, job_id, table_json, header_question)
+            logger.info(f"Searching with keyword: {keyword}")
+            result = await search_and_answer(keyword, job_id, table_json, header_question, logger)
 
             if result:
                 # Parse the result and update the table
@@ -384,7 +389,7 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str) -> Tuple[int, int, str]:
+async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger) -> Tuple[int, int, str]:
     try:
         row_header = table_json["headers"]["rows"][row_idx]
         col_header = table_json["headers"]["columns"][col_idx]
@@ -400,7 +405,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     keywords = generate_keywords(user_input, sub_question)
     logger.info(f"Keywords: {keywords}")
 
-    tasks = [search_and_answer(keyword, job_id, table_json, sub_question) for keyword in keywords]
+    tasks = [search_and_answer(keyword, job_id, table_json, sub_question, logger) for keyword in keywords]
     results = await asyncio.gather(*tasks)
 
     for result in results:
@@ -411,7 +416,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     logger.info(f"No answer found, marking cell with 'X'")
     return row_idx, col_idx, "X"
 
-async def process_empty_cells(user_input: str, table_json: dict, job_id: str) -> dict:
+async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger) -> dict:
     logger.info("Processing empty cells in parallel")
 
     empty_cells = find_all_empty_cells(table_json)
@@ -419,7 +424,7 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str) ->
         logger.info("No empty cells - table is complete")
         return table_json
 
-    tasks = [process_cell(row_idx, col_idx, user_input, table_json, job_id) for row_idx, col_idx in empty_cells]
+    tasks = [process_cell(row_idx, col_idx, user_input, table_json, job_id, logger) for row_idx, col_idx in empty_cells]
     results = await asyncio.gather(*tasks)
 
     for row_idx, col_idx, result in results:
@@ -427,20 +432,22 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str) ->
         logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
 
     # Save the updated table after processing all cells
-    with open(f"jobs/{job_id}/table.json", "w") as f:
-        json.dump(table_json, f, indent=2)
+    with FileLock(f"jobs/{job_id}/table.json.lock"):
+        with open(f"jobs/{job_id}/table.json", "w") as f:
+            json.dump(table_json, f, indent=2)
 
     logger.info("Finished processing all cells")
     return table_json
 
-async def main():
-    user_input = "Top 4 car companies in the world, along with their annual revenues, market shares, profit margins, and growth rates"
-    job_id = "1001"
-    initial_table = generate_table(user_input, job_id)
-    updated_table = await initialize_row_headers(user_input, initial_table, job_id)
-    completed_table = await process_empty_cells(user_input, updated_table, job_id)
-    print(completed_table)
+async def process_job(user_input: str, job_id: str):
+    logger = setup_job_logger(job_id)
+    logger.info(f"Starting job {job_id} with user input: {user_input}")
+    
+    initial_table = generate_table(user_input, job_id, logger)
+    updated_table = await initialize_row_headers(user_input, initial_table, job_id, logger)
+    completed_table = await process_empty_cells(user_input, updated_table, job_id, logger)
+    
+    logger.info(f"Job {job_id} completed")
+    logger.info(f"Final table: {json.dumps(completed_table, indent=2)}")
+    
     return completed_table
-
-if __name__ == "__main__":
-    asyncio.run(main())
