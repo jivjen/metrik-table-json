@@ -177,7 +177,7 @@ async def search_and_answer(search_term, job_id, table, sub_question, logger: lo
     urls = [result["link"] for result in google_search_result.get("items", [])]
     
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_and_analyze(session, url, table, sub_question) for url in urls]
+        tasks = [fetch_and_analyze(session, url, table, sub_question, logger) for url in urls]
         results = await asyncio.gather(*tasks)
         
     for result in results:
