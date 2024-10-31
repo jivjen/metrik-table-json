@@ -371,7 +371,7 @@ async def analyse_result(search_result: str, markdown_table: str, sub_question: 
         subQuestionAnswered: str = Field(description = "Answer found for the question or not")
         result: str = Field(description="The answer to the sub-question")
 
-    search_analysis_response = await openai.beta.chat.completions.parse(
+    search_analysis_response = openai.beta.chat.completions.parse(
           model="gpt-4o-mini",
           messages=[
               {"role": "system", "content": search_analyser_system_prompt},
