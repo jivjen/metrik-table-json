@@ -413,13 +413,21 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     tasks = [search_and_answer(keyword, job_id, table_json, sub_question, logger) for keyword in keywords]
     results = await asyncio.gather(*tasks)
 
-    for result in results:
-        if result:
-            logger.info(f"Found answer: {result}")
-            return row_idx, col_idx, result
+    result = "X"  # Default to "X" if no answer is found
+    for r in results:
+        if r:
+            logger.info(f"Found answer: {r}")
+            result = r
+            break
 
-    logger.info(f"No answer found, marking cell with 'X'")
-    return row_idx, col_idx, "X"
+    # Update the table.json file
+    table_json["data"][row_idx][col_idx] = result
+    with FileLock(f"jobs/{job_id}/table.json.lock"):
+        with open(f"jobs/{job_id}/table.json", "w") as f:
+            json.dump(table_json, f, indent=2)
+    
+    logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
+    return row_idx, col_idx, result
 
 async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> dict:
     logger.info("Processing empty cells in parallel")
@@ -433,16 +441,7 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
         return await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger)
 
     tasks = [process_cell_wrapper(row_idx, col_idx) for row_idx, col_idx in empty_cells]
-    results = await asyncio.gather(*tasks)
-
-    for row_idx, col_idx, result in results:
-        table_json = update_cell_value(table_json, row_idx, col_idx, result)
-        logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
-
-    # Save the updated table after processing all cells
-    with FileLock(f"jobs/{job_id}/table.json.lock"):
-        with open(f"jobs/{job_id}/table.json", "w") as f:
-            json.dump(table_json, f, indent=2)
+    await asyncio.gather(*tasks)
 
     logger.info("Finished processing all cells")
     return table_json
