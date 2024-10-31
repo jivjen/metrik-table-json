@@ -312,7 +312,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str)
                 class EntitiesExtraction(BaseModel):
                     entities: List[str] = Field(description="List of extracted entity names")
 
-                entities_response = await openai.beta.chat.completions.parse(
+                entities_response = openai.beta.chat.completions.parse(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": entities_parser_prompt},
