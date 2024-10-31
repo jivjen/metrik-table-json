@@ -4,7 +4,7 @@ import uuid
 import json
 import os
 from filelock import FileLock
-from multiprocessing import Process, Manager
+from multiprocessing import Process, Manager, freeze_support
 from researcherv2 import process_job
 
 app = FastAPI()
@@ -17,8 +17,13 @@ class JobStatus(BaseModel):
     table: dict = None
 
 # Shared job status storage
-manager = Manager()
-job_statuses = manager.dict()
+manager = None
+job_statuses = None
+
+def initialize_manager():
+    global manager, job_statuses
+    manager = Manager()
+    job_statuses = manager.dict()
 
 @app.post("/start_job")
 async def start_job(user_input: UserInput):
@@ -57,5 +62,7 @@ def run_job(job_id: str, user_input: str):
         print(f"Error processing job {job_id}: {str(e)}")
 
 if __name__ == "__main__":
+    freeze_support()
+    initialize_manager()
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
