@@ -29,7 +29,7 @@ def setup_job_logger(job_id: str):
     logger.addHandler(file_handler)
     return logger
 
-def generate_table(user_input: str, job_id: str, logger):
+def generate_table(user_input: str, job_id: str, logger: logging.Logger):
     logger.info("Generating Table")
     table_generator_system_prompt = """
     Role: You are an expert researcher and critical thinker.
@@ -94,7 +94,7 @@ def generate_table(user_input: str, job_id: str, logger):
     return table_generator_response.choices[0].message.parsed.dict()
 
 
-def generate_row_header_subquestion(user_input: str, table_json: dict, logger) -> str:
+def generate_row_header_subquestion(user_input: str, table_json: dict, logger: logging.Logger) -> str:
     logger.info("Generating Row Header Sub-Question")
 
     sub_question_generator_system_prompt = """
@@ -168,7 +168,7 @@ def generate_keywords(user_input: str, sub_question: str) -> List[str]:
 
     return keyword_generator_response.choices[0].message.parsed.keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question, logger):
+async def search_and_answer(search_term, job_id, table, sub_question, logger: logging.Logger):
     """Search the Web and obtain a list of web results."""
     logger.info(f"Searching for: {search_term}")
     google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
@@ -204,7 +204,7 @@ async def fetch_and_analyze(session, url, table, sub_question):
         logger.error(f"Error fetching URL {url}: {str(e)}")
     return ""
 
-async def initialize_row_headers(user_input: str, table_json: dict, job_id: str, logger) -> dict:
+async def initialize_row_headers(user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> dict:
     logger.info("Initializing Row Headers")
 
     # First, determine if we need to find headers
@@ -390,7 +390,7 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger) -> Tuple[int, int, str]:
+async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> Tuple[int, int, str]:
     try:
         row_header = table_json["headers"]["rows"][row_idx]
         col_header = table_json["headers"]["columns"][col_idx]
@@ -417,7 +417,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     logger.info(f"No answer found, marking cell with 'X'")
     return row_idx, col_idx, "X"
 
-async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger) -> dict:
+async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> dict:
     logger.info("Processing empty cells in parallel")
 
     empty_cells = find_all_empty_cells(table_json)
