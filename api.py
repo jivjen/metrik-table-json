@@ -19,18 +19,23 @@ jobs: Dict[str, Dict[str, Any]] = {}
 job_queue = asyncio.Queue()
 
 async def job_worker():
+    logging.info("Job worker started")
     while True:
         try:
+            logging.info("Job worker waiting for new job")
             job_id, user_input = await asyncio.wait_for(job_queue.get(), timeout=1.0)
+            logging.info(f"Job worker received job {job_id}")
             await run_job(job_id, user_input)
         except asyncio.TimeoutError:
             continue
         except asyncio.CancelledError:
+            logging.info("Job worker cancelled")
             break
         except Exception as e:
             logging.error(f"Unexpected error in job_worker: {str(e)}")
         finally:
             job_queue.task_done()
+    logging.info("Job worker stopped")
 
 async def run_job(job_id: str, user_input: str):
     logger = setup_logging(job_id)
@@ -103,7 +108,9 @@ worker_task = None
 @app.on_event("startup")
 async def startup_event():
     global worker_task
-    worker_task = asyncio.create_task(job_worker())
+    loop = asyncio.get_event_loop()
+    worker_task = loop.create_task(job_worker())
+    logging.info("Job worker task created and started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
