@@ -135,7 +135,7 @@ def generate_row_header_subquestion(user_input: str, table_json: dict, logger: l
     logger.info(f"Generated sub-question: {sub_question_response.choices[0].message.parsed.question}")
     return sub_question_response.choices[0].message.parsed.question
 
-def generate_keywords(user_input: str, sub_question: str) -> List[str]:
+def generate_keywords(user_input: str, sub_question: str, logger: logging.Logger) -> List[str]:
     keyword_generator_system_prompt = """
         Role: You are a professional Google search researcher.
         Task: Given a main user query for context and a specific sub-question, your primary task is to generate 5 unique Google search keywords that will help gather detailed information primarily related to the sub-question.
@@ -166,7 +166,9 @@ def generate_keywords(user_input: str, sub_question: str) -> List[str]:
         response_format=KeywordGeneration
     )
 
-    return keyword_generator_response.choices[0].message.parsed.keywords
+    keywords = keyword_generator_response.choices[0].message.parsed.keywords
+    logger.info(f"Generated keywords: {keywords}")
+    return keywords
 
 async def search_and_answer(search_term, job_id, table, sub_question, logger: logging.Logger):
     """Search the Web and obtain a list of web results."""
@@ -185,14 +187,14 @@ async def search_and_answer(search_term, job_id, table, sub_question, logger: lo
     logger.info(f"No answer found for: {search_term}")
     return ""
 
-async def fetch_and_analyze(session, url, table, sub_question):
+async def fetch_and_analyze(session, url, table, sub_question, logger: logging.Logger):
     search_url = f'https://r.jina.ai/{url}'
     headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
     try:
         async with session.get(search_url, headers=headers, timeout=50) as response:
             if response.status == 200:
                 search_result = await response.text()
-                answer = analyse_result(search_result, table, sub_question, url)
+                answer = analyse_result(search_result, table, sub_question, url, logger)
                 if answer:
                     logger.info(f"Answer found: {answer}")
                     return answer
@@ -285,7 +287,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
 
     return table_json
 
-def analyse_result(search_result: str, markdown_table: str, sub_question: str, url: str) -> List[str]:
+def analyse_result(search_result: str, markdown_table: str, sub_question: str, url: str, logger: logging.Logger) -> List[str]:
   tokens = encoding.encode(search_result)
 
   # Define the chunk size
@@ -358,7 +360,7 @@ def find_all_empty_cells(table_json: dict) -> List[Tuple[int, int]]:
                 empty_cells.append((row_idx, col_idx))
     return empty_cells
 
-def generate_cell_subquestion(row_header: str, col_header: str, table_json: dict) -> str:
+def generate_cell_subquestion(row_header: str, col_header: str, table_json: dict, logger: logging.Logger) -> str:
     """Generate a sub-question for a specific cell based on its headers."""
     system_prompt = """
     Role: You are an expert researcher and critical thinker.
@@ -383,7 +385,9 @@ def generate_cell_subquestion(row_header: str, col_header: str, table_json: dict
         response_format=SubQuestion
     )
 
-    return response.choices[0].message.parsed.question
+    question = response.choices[0].message.parsed.question
+    logger.info(f"Generated cell sub-question: {question}")
+    return question
 
 def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) -> dict:
     """Update a specific cell in the table with a new value."""
@@ -400,10 +404,10 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
 
     logger.info(f"Processing cell: {row_header} x {col_header}")
 
-    sub_question = generate_cell_subquestion(row_header, col_header, table_json)
+    sub_question = generate_cell_subquestion(row_header, col_header, table_json, logger)
     logger.info(f"Generated sub-question: {sub_question}")
 
-    keywords = generate_keywords(user_input, sub_question)
+    keywords = generate_keywords(user_input, sub_question, logger)
     logger.info(f"Keywords: {keywords}")
 
     tasks = [search_and_answer(keyword, job_id, table_json, sub_question, logger) for keyword in keywords]
