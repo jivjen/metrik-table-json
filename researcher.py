@@ -469,7 +469,13 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str) ->
             return "Error"
 
     empty_cells = find_all_empty_cells(table_json)
-    tasks = [process_cell(row_idx, col_idx) for row_idx, col_idx in empty_cells]
+    semaphore = asyncio.Semaphore(10)  # Limit concurrent tasks to 10
+
+    async def process_cell_with_semaphore(row_idx: int, col_idx: int):
+        async with semaphore:
+            return await process_cell(row_idx, col_idx)
+
+    tasks = [process_cell_with_semaphore(row_idx, col_idx) for row_idx, col_idx in empty_cells]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for (row_idx, col_idx), result in zip(empty_cells, results):

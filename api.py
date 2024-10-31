@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 import asyncio
 from typing import Dict, Any
 from researcher import generate_table, initialize_row_headers, process_empty_cells, display_final_table, setup_logging
 import logging
+from concurrent.futures import ThreadPoolExecutor
+
 app = FastAPI()
+executor = ThreadPoolExecutor(max_workers=4)  # Adjust the number of workers as needed
 
 class JobInput(BaseModel):
     user_input: str
@@ -49,11 +52,11 @@ async def run_job(job_id: str, user_input: str):
         jobs[job_id]["error"] = str(e)
 
 @app.post("/start_job")
-async def start_job(job_input: JobInput):
+async def start_job(job_input: JobInput, background_tasks: BackgroundTasks):
     job_id = str(len(jobs) + 1)
     jobs[job_id] = {"status": "starting", "result": {}}
     # Run the job in the background
-    asyncio.create_task(run_job(job_id, job_input.user_input))
+    background_tasks.add_task(run_job, job_id, job_input.user_input)
     # Immediately return the job_id without waiting for the job to complete
     return {"job_id": job_id}
 
@@ -66,7 +69,9 @@ async def poll_status(job_id: str):
     markdown_table = ""
     
     if job["result"] and job["status"] == "completed":
-        markdown_table = display_final_table(job["result"], "markdown")
+        markdown_table = await asyncio.get_event_loop().run_in_executor(
+            executor, display_final_table, job["result"], "markdown"
+        )
     
     return JobStatus(
         status=job["status"],
@@ -80,15 +85,6 @@ async def poll_status(job_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    import asyncio
     logging.basicConfig(level=logging.INFO)
     
-    async def run_server():
-        config = uvicorn.Config(app, host="0.0.0.0", port=8000)
-        server = uvicorn.Server(config)
-        await server.serve()
-
-    try:
-        asyncio.run(run_server())
-    except KeyboardInterrupt:
-        print("\nServer stopped by user")
+    uvicorn.run(app, host="0.0.0.0", port=8000, workers=4)
