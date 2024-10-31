@@ -54,7 +54,14 @@ async def poll_status(job_id: str, job_statuses=Depends(get_job_statuses)):
         with FileLock(f"jobs/{job_id}/table.json.lock"):
             with open(f"jobs/{job_id}/table.json", "r") as f:
                 table = json.load(f)
-        return JobStatus(status=status, table=table)
+        
+        # Check if any cell in the table has been filled
+        is_table_empty = all(cell == "" for row in table["data"] for cell in row)
+        
+        if is_table_empty:
+            return JobStatus(status=status, table=None)
+        else:
+            return JobStatus(status=status, table=table)
     except FileNotFoundError:
         return JobStatus(status=status, table=None)
 

@@ -413,7 +413,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     tasks = [search_and_answer(keyword, job_id, table_json, sub_question, logger) for keyword in keywords]
     results = await asyncio.gather(*tasks)
 
-    result = "X"  # Default to "X" if no answer is found
+    result = ""  # Default to empty string if no answer is found
     for r in results:
         if r:
             logger.info(f"Found answer: {r}")
