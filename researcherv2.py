@@ -170,14 +170,14 @@ def generate_keywords(user_input: str, sub_question: str, logger: logging.Logger
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question, logger: logging.Logger):
+async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger):
     """Search the Web and obtain a list of web results."""
     logger.info(f"Searching for: {search_term}")
     google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
     urls = [result["link"] for result in google_search_result.get("items", [])]
     
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_and_analyze(session, url, table, sub_question, logger) for url in urls]
+        tasks = [fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger) for url in urls]
         results = await asyncio.gather(*tasks)
         
     for result in results:
@@ -187,7 +187,7 @@ async def search_and_answer(search_term, job_id, table, sub_question, logger: lo
     logger.info(f"No answer found for: {search_term}")
     return ""
 
-async def fetch_and_analyze(session, url, table, sub_question, logger: logging.Logger):
+async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger: logging.Logger):
     search_url = f'https://r.jina.ai/{url}'
     headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
     try:
@@ -197,6 +197,12 @@ async def fetch_and_analyze(session, url, table, sub_question, logger: logging.L
                 answer = analyse_result(search_result, table, sub_question, url, logger)
                 if answer:
                     logger.info(f"Answer found: {answer}")
+                    # Update the table immediately
+                    table["data"][row_idx][col_idx] = answer
+                    with FileLock(f"jobs/{job_id}/table.json.lock"):
+                        with open(f"jobs/{job_id}/table.json", "w") as f:
+                            json.dump(table, f, indent=2)
+                    logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {answer}")
                     return answer
             else:
                 logger.warning(f"Jina returned an error: {response.status} for URL: {url}")
@@ -410,7 +416,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     keywords = generate_keywords(user_input, sub_question, logger)
     logger.info(f"Keywords: {keywords}")
 
-    tasks = [search_and_answer(keyword, job_id, table_json, sub_question, logger) for keyword in keywords]
+    tasks = [search_and_answer(keyword, job_id, table_json, sub_question, row_idx, col_idx, logger) for keyword in keywords]
     results = await asyncio.gather(*tasks)
 
     result = ""  # Default to empty string if no answer is found
@@ -420,13 +426,9 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
             result = r
             break
 
-    # Update the table.json file
-    table_json["data"][row_idx][col_idx] = result
-    with FileLock(f"jobs/{job_id}/table.json.lock"):
-        with open(f"jobs/{job_id}/table.json", "w") as f:
-            json.dump(table_json, f, indent=2)
+    # The table.json file is now updated in the search_and_answer function
+    # We don't need to update it here anymore
     
-    logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
     return row_idx, col_idx, result
 
 async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> dict:
