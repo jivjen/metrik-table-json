@@ -8,6 +8,7 @@ import os
 from IPython.display import display, Markdown
 import tiktoken
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import asyncio
 
 encoding = tiktoken.encoding_for_model("gpt-4o-mini")
 GOOGLE_API_KEY = "AIzaSyBiTmP3mKXTUb13BtpDivIDZ5X5KccFaqU"
