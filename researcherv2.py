@@ -429,7 +429,10 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
         logger.info("No empty cells - table is complete")
         return table_json
 
-    tasks = [process_cell(row_idx, col_idx, user_input, table_json, job_id, logger) for row_idx, col_idx in empty_cells]
+    async def process_cell_wrapper(row_idx: int, col_idx: int):
+        return await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger)
+
+    tasks = [process_cell_wrapper(row_idx, col_idx) for row_idx, col_idx in empty_cells]
     results = await asyncio.gather(*tasks)
 
     for row_idx, col_idx, result in results:
