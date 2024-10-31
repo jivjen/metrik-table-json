@@ -22,11 +22,12 @@ async def job_worker():
     logging.info("Job worker started")
     while True:
         try:
-            logging.info("Job worker waiting for new job")
+            logging.info(f"Job worker waiting for new job. Queue size: {job_queue.qsize()}")
             job_id, user_input = await asyncio.wait_for(job_queue.get(), timeout=1.0)
             logging.info(f"Job worker received job {job_id}")
             await run_job(job_id, user_input)
         except asyncio.TimeoutError:
+            logging.debug("Job worker timeout, continuing...")
             continue
         except asyncio.CancelledError:
             logging.info("Job worker cancelled")
@@ -34,7 +35,9 @@ async def job_worker():
         except Exception as e:
             logging.error(f"Unexpected error in job_worker: {str(e)}")
         finally:
-            job_queue.task_done()
+            if 'job_id' in locals():
+                job_queue.task_done()
+                logging.info(f"Job {job_id} processing completed")
     logging.info("Job worker stopped")
 
 async def run_job(job_id: str, user_input: str):
@@ -79,7 +82,10 @@ async def run_job(job_id: str, user_input: str):
 async def start_job(job_input: JobInput):
     job_id = str(len(jobs) + 1)
     jobs[job_id] = {"status": "queued", "result": {}}
+    logging.info(f"New job created with ID: {job_id}")
     await job_queue.put((job_id, job_input.user_input))
+    logging.info(f"Job {job_id} added to queue")
+    logging.info(f"Current queue size: {job_queue.qsize()}")
     return {"job_id": job_id}
 
 @app.get("/poll_status/{job_id}")
@@ -111,6 +117,13 @@ async def startup_event():
     loop = asyncio.get_event_loop()
     worker_task = loop.create_task(job_worker())
     logging.info("Job worker task created and started")
+    
+    # Add a check to ensure the worker is running
+    await asyncio.sleep(1)  # Give the worker a moment to start
+    if not worker_task.done():
+        logging.info("Job worker is running")
+    else:
+        logging.error("Job worker failed to start")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -122,5 +135,5 @@ async def shutdown_event():
             pass
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     uvicorn.run("api:app", host="0.0.0.0", port=8000, workers=1, log_level="info")
