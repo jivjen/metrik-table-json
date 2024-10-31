@@ -249,7 +249,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
         logger.info(f"Generated sub-question: {header_question}")
 
         # Generate keywords using existing function
-        header_keywords = generate_keywords(user_input, header_question)
+        header_keywords = generate_keywords(user_input, header_question, logger)
 
         # Search and analyze results using existing function
         for keyword in header_keywords:
