@@ -183,7 +183,7 @@ async def fetch_and_analyze(session, url, table, sub_question):
     search_url = f'https://r.jina.ai/{url}'
     headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
     try:
-        async with session.get(search_url, headers=headers, timeout=10) as response:
+        async with session.get(search_url, headers=headers, timeout=50) as response:
             if response.status == 200:
                 search_result = await response.text()
                 answer = analyse_result(search_result, table, sub_question, url)
@@ -439,6 +439,7 @@ async def main():
     initial_table = generate_table(user_input, job_id)
     updated_table = await initialize_row_headers(user_input, initial_table, job_id)
     completed_table = await process_empty_cells(user_input, updated_table, job_id)
+    print(completed_table)
     return completed_table
 
 if __name__ == "__main__":
