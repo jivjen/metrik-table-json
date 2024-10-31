@@ -169,37 +169,33 @@ async def search_and_answer(search_term, job_id, table, sub_question):
     urls = [result["link"] for result in google_search_result.get("items", [])]
     
     async with aiohttp.ClientSession() as session:
-        tasks = []
-        for url in urls:
-            search_url = f'https://r.jina.ai/{url}'
-            headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
-            task = asyncio.create_task(fetch_and_analyze(session, search_url, headers, table, sub_question, url))
-            tasks.append(task)
-        
+        tasks = [fetch_and_analyze(session, url, table, sub_question) for url in urls]
         results = await asyncio.gather(*tasks)
         
-        for result in results:
-            if result:
-                return result
+    for result in results:
+        if result:
+            return result
     
     logger.info(f"No answer found for: {search_term}")
     return ""
 
-async def fetch_and_analyze(session, url, headers, table, sub_question, original_url):
+async def fetch_and_analyze(session, url, table, sub_question):
+    search_url = f'https://r.jina.ai/{url}'
+    headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
     try:
-        async with session.get(url, headers=headers, timeout=10) as response:
+        async with session.get(search_url, headers=headers, timeout=10) as response:
             if response.status == 200:
                 search_result = await response.text()
-                answer = analyse_result(search_result, table, sub_question, original_url)
+                answer = analyse_result(search_result, table, sub_question, url)
                 if answer:
                     logger.info(f"Answer found: {answer}")
                     return answer
             else:
-                logger.warning(f"Jina returned an error: {response.status} for URL: {original_url}")
+                logger.warning(f"Jina returned an error: {response.status} for URL: {url}")
     except asyncio.TimeoutError:
-        logger.warning(f"Timeout fetching URL {original_url}")
+        logger.warning(f"Timeout fetching URL {url}")
     except Exception as e:
-        logger.error(f"Error fetching URL {original_url}: {str(e)}")
+        logger.error(f"Error fetching URL {url}: {str(e)}")
     return ""
 
 def initialize_row_headers(user_input: str, table_json: dict, job_id: str) -> dict:
