@@ -49,14 +49,14 @@ async def run_job(job_id: str, user_input: str):
         async with asyncio.timeout(3600):  # 1 hour timeout
             logger.info("Generating initial table...")
             jobs[job_id]["status"] = "generating_initial_table"
-            initial_table = await generate_table(user_input, job_id)
+            initial_table = generate_table(user_input, job_id)
             jobs[job_id]["result"] = initial_table
             jobs[job_id]["status"] = "initial_table_generated"
             logger.info("Initial table generated")
             
             logger.info("Initializing row headers...")
             jobs[job_id]["status"] = "initializing_row_headers"
-            updated_table = await initialize_row_headers(user_input, initial_table, job_id)
+            updated_table = initialize_row_headers(user_input, initial_table, job_id)
             jobs[job_id]["result"] = updated_table
             jobs[job_id]["status"] = "row_headers_initialized"
             logger.info("Row headers initialized")
