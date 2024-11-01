@@ -182,6 +182,12 @@ async def search_and_answer(search_term, job_id, table, sub_question, row_idx, c
         
     for result in results:
         if result:
+            # Update the table immediately
+            table["data"][row_idx][col_idx] = result
+            with FileLock(f"jobs/{job_id}/table.json.lock"):
+                with open(f"jobs/{job_id}/table.json", "w") as f:
+                    json.dump(table, f, indent=2)
+            logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
             return result
     
     logger.info(f"No answer found for: {search_term}")
@@ -197,12 +203,6 @@ async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, 
                 answer = analyse_result(search_result, table, sub_question, url, logger)
                 if answer:
                     logger.info(f"Answer found: {answer}")
-                    # Update the table immediately
-                    table["data"][row_idx][col_idx] = answer
-                    with FileLock(f"jobs/{job_id}/table.json.lock"):
-                        with open(f"jobs/{job_id}/table.json", "w") as f:
-                            json.dump(table, f, indent=2)
-                    logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {answer}")
                     return answer
             else:
                 logger.warning(f"Jina returned an error: {response.status} for URL: {url}")
