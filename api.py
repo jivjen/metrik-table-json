@@ -72,13 +72,12 @@ async def poll_status(job_id: str, job_statuses=Depends(get_job_statuses)):
     status = job_info["status"]
     
     table = None
-    if status != "STARTED":
-        try:
-            with FileLock(f"jobs/{job_id}/table.json.lock"):
-                with open(f"jobs/{job_id}/table.json", "r") as f:
-                    table = json.load(f)
-        except FileNotFoundError:
-            logger.warning(f"Table file not found for job {job_id}")
+    try:
+        with FileLock(f"jobs/{job_id}/table.json.lock"):
+            with open(f"jobs/{job_id}/table.json", "r") as f:
+                table = json.load(f)
+    except FileNotFoundError:
+        logger.info(f"Table file not yet generated for job {job_id}")
     
     return JobStatus(status=status, table=table)
 
