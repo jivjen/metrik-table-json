@@ -27,6 +27,10 @@ def setup_job_logger(job_id: str):
     file_handler = logging.FileHandler(f"jobs/{job_id}/job.log")
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(file_handler)
+    # Add a StreamHandler to also log to console
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(console_handler)
     return logger
 
 def generate_table(user_input: str, job_id: str, logger: logging.Logger):
