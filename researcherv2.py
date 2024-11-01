@@ -484,6 +484,14 @@ def process_job(user_input: str, job_id: str, stop_flag):
     else:
         logger.info(f"Job {job_id} completed")
     
+    # Ensure row headers are correctly set
+    for i, row in enumerate(completed_table["data"]):
+        if i < len(completed_table["headers"]["rows"]):
+            row.insert(0, completed_table["headers"]["rows"][i])
+    
+    # Update the column headers to include the row header column
+    completed_table["headers"]["columns"].insert(0, "Entity")
+    
     logger.info(f"Final table: {json.dumps(completed_table, indent=2)}")
     
     return completed_table
