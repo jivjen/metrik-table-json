@@ -7,7 +7,7 @@ import logging
 from filelock import FileLock
 from multiprocessing import Process, Manager, freeze_support
 from researcherv2 import process_job
-from datetime import datetime, timedelta
+from datetime import datetime
 
 app = FastAPI()
 
@@ -76,21 +76,6 @@ def run_job(job_id: str, user_input: str, job_statuses):
         logger.error(f"Error processing job {job_id}: {str(e)}", exc_info=True)
     finally:
         job_statuses[job_id]["end_time"] = datetime.now()
-
-@app.on_event("startup")
-async def startup_event():
-    Process(target=cleanup_old_jobs, args=(job_statuses,)).start()
-
-def cleanup_old_jobs(job_statuses):
-    while True:
-        current_time = datetime.now()
-        for job_id, job_info in list(job_statuses.items()):
-            if job_info["status"] in ["COMPLETED", "ERROR"]:
-                if current_time - job_info["end_time"] > timedelta(hours=1):
-                    del job_statuses[job_id]
-                    logger.info(f"Cleaned up job {job_id}")
-        # Sleep for 10 minutes before next cleanup
-        time.sleep(600)
 
 if __name__ == "__main__":
     freeze_support()
