@@ -6,9 +6,10 @@ import json
 import os
 import logging
 from filelock import FileLock
-from multiprocessing import Process, Manager, freeze_support
+from multiprocessing import Process, Manager, freeze_support, Event
 from researcherv2 import process_job
 from datetime import datetime
+import signal
 
 app = FastAPI()
 
@@ -39,30 +40,34 @@ manager = None
 job_statuses = None
 
 def initialize_manager():
-    global manager, job_statuses
+    global manager, job_statuses, job_stop_events
     if manager is None:
         manager = Manager()
         job_statuses = manager.dict()
+        job_stop_events = manager.dict()
 
 def get_job_statuses():
     if job_statuses is None:
         initialize_manager()
-    return job_statuses
+    return job_statuses, job_stop_events
 
 @app.post("/start_job")
-async def start_job(user_input: UserInput, job_statuses=Depends(get_job_statuses)):
+async def start_job(user_input: UserInput, job_data=Depends(get_job_statuses)):
+    job_statuses, job_stop_events = job_data
     job_id = str(uuid.uuid4())
     os.makedirs(f"jobs/{job_id}", exist_ok=True)
     
     job_statuses[job_id] = {"status": "STARTED", "start_time": datetime.now()}
+    job_stop_events[job_id] = Event()
     
     # Start the job in a separate process
-    Process(target=run_job, args=(job_id, user_input.query, job_statuses)).start()
+    Process(target=run_job, args=(job_id, user_input.query, job_statuses, job_stop_events[job_id])).start()
     
     return {"job_id": job_id}
 
 @app.get("/poll_status/{job_id}")
-async def poll_status(job_id: str, job_statuses=Depends(get_job_statuses)):
+async def poll_status(job_id: str, job_data=Depends(get_job_statuses)):
+    job_statuses, _ = job_data
     if job_id not in job_statuses:
         raise HTTPException(status_code=404, detail="Job not found")
     
@@ -80,11 +85,25 @@ async def poll_status(job_id: str, job_statuses=Depends(get_job_statuses)):
     
     return JobStatus(status=status, table=table)
 
-def run_job(job_id: str, user_input: str, job_statuses):
+@app.post("/stop_job/{job_id}")
+async def stop_job(job_id: str, job_data=Depends(get_job_statuses)):
+    job_statuses, job_stop_events = job_data
+    if job_id not in job_statuses:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job_statuses[job_id]["status"] in ["COMPLETED", "ERROR"]:
+        return {"message": f"Job {job_id} has already finished"}
+    
+    job_stop_events[job_id].set()
+    job_statuses[job_id]["status"] = "STOPPED"
+    return {"message": f"Job {job_id} has been stopped"}
+
+def run_job(job_id: str, user_input: str, job_statuses, stop_event):
     try:
         job_statuses[job_id]["status"] = "PROCESSING"
-        process_job(user_input, job_id)
-        job_statuses[job_id]["status"] = "COMPLETED"
+        process_job(user_input, job_id, stop_event)
+        if not stop_event.is_set():
+            job_statuses[job_id]["status"] = "COMPLETED"
     except Exception as e:
         job_statuses[job_id]["status"] = "ERROR"
         logger.error(f"Error processing job {job_id}: {str(e)}", exc_info=True)
