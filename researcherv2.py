@@ -260,7 +260,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
         # Search and analyze results using existing function
         for keyword in header_keywords:
             logger.info(f"Searching with keyword: {keyword}")
-            result = await search_and_answer(keyword, job_id, table_json, header_question, logger)
+            result = await search_and_answer(keyword, job_id, table_json, header_question, 0, 0, logger)
 
             if result:
                 # Parse the result and update the table
