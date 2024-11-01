@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 class UserInput(BaseModel):
     query: str
 
+from typing import Optional
+
 class JobStatus(BaseModel):
     status: str
-    table: dict = None
+    table: Optional[dict] = None
 
 # Shared job status storage
 manager = None
@@ -67,14 +69,16 @@ async def poll_status(job_id: str, job_statuses=Depends(get_job_statuses)):
     job_info = job_statuses[job_id]
     status = job_info["status"]
     
-    try:
-        with FileLock(f"jobs/{job_id}/table.json.lock"):
-            with open(f"jobs/{job_id}/table.json", "r") as f:
-                table = json.load(f)
-        
-        return JobStatus(status=status, table=table)
-    except FileNotFoundError:
-        return JobStatus(status=status, table=None)
+    table = None
+    if status != "STARTED":
+        try:
+            with FileLock(f"jobs/{job_id}/table.json.lock"):
+                with open(f"jobs/{job_id}/table.json", "r") as f:
+                    table = json.load(f)
+        except FileNotFoundError:
+            logger.warning(f"Table file not found for job {job_id}")
+    
+    return JobStatus(status=status, table=table)
 
 def run_job(job_id: str, user_input: str, job_statuses):
     try:
