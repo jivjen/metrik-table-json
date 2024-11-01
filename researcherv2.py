@@ -436,7 +436,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     
     return row_idx, col_idx, result
 
-async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger: logging.Logger, stop_event: Event) -> dict:
+async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger: logging.Logger, stop_flag) -> dict:
     logger.info("Processing empty cells in parallel")
 
     empty_cells = find_all_empty_cells(table_json)
@@ -445,7 +445,7 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
         return table_json
 
     async def process_cell_wrapper(row_idx: int, col_idx: int):
-        if stop_event.is_set():
+        if stop_flag():
             return row_idx, col_idx, "Stopped"
         return await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger)
 
@@ -456,32 +456,30 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
         if result != "Stopped":
             table_json["data"][row_idx][col_idx] = result
 
-    if stop_event.is_set():
+    if stop_flag():
         logger.info("Job stopped while processing cells")
     else:
         logger.info("Finished processing all cells")
 
     return table_json
 
-from multiprocessing import Event
-
-def process_job(user_input: str, job_id: str, stop_event: Event):
+def process_job(user_input: str, job_id: str, stop_flag):
     logger = setup_job_logger(job_id)
     logger.info(f"Starting job {job_id} with user input: {user_input}")
     
     initial_table = generate_table(user_input, job_id, logger)
-    if stop_event.is_set():
+    if stop_flag():
         logger.info(f"Job {job_id} stopped after generating initial table")
         return initial_table
 
     updated_table = asyncio.run(initialize_row_headers(user_input, initial_table, job_id, logger))
-    if stop_event.is_set():
+    if stop_flag():
         logger.info(f"Job {job_id} stopped after initializing row headers")
         return updated_table
 
-    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, stop_event))
+    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, stop_flag))
     
-    if stop_event.is_set():
+    if stop_flag():
         logger.info(f"Job {job_id} stopped during cell processing")
     else:
         logger.info(f"Job {job_id} completed")
