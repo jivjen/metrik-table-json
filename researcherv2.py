@@ -175,37 +175,29 @@ def generate_keywords(user_input: str, sub_question: str, logger: logging.Logger
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-async def search_and_answer(keywords, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False):
+async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False):
     """Search the Web and obtain a list of web results."""
-    logger.info(f"Searching with keywords: {keywords}")
-    batch_size = 4
-    for i in range(0, len(keywords), batch_size):
-        batch = keywords[i:i+batch_size]
-        logger.info(f"Processing batch: {batch}")
-        
-        async with aiohttp.ClientSession() as session:
-            tasks = []
-            for search_term in batch:
-                google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
-                urls = [result["link"] for result in google_search_result.get("items", [])]
-                tasks.extend([fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger) for url in urls])
-            
-            results = await asyncio.gather(*tasks)
-            
-            for result in results:
-                if result:
-                    if not is_header:
-                        # Update the table immediately
-                        table["data"][row_idx][col_idx] = result
-                        with FileLock(f"jobs/{job_id}/table.json.lock"):
-                            with open(f"jobs/{job_id}/table.json", "w") as f:
-                                json.dump(table, f, indent=2)
-                        logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
-                    return result
-        
-        logger.info(f"No answer found for batch: {batch}")
+    logger.info(f"Searching with keyword: {search_term}")
     
-    logger.info("No answer found for all keywords")
+    async with aiohttp.ClientSession() as session:
+        google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
+        urls = [result["link"] for result in google_search_result.get("items", [])]
+        tasks = [fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger) for url in urls]
+        
+        results = await asyncio.gather(*tasks)
+        
+        for result in results:
+            if result:
+                if not is_header:
+                    # Update the table immediately
+                    table["data"][row_idx][col_idx] = result
+                    with FileLock(f"jobs/{job_id}/table.json.lock"):
+                        with open(f"jobs/{job_id}/table.json", "w") as f:
+                            json.dump(table, f, indent=2)
+                    logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
+                return result
+    
+    logger.info(f"No answer found for keyword: {search_term}")
     return ""
 
 async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger: logging.Logger):
@@ -431,14 +423,21 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
     keywords = generate_keywords(user_input, sub_question, logger)
     logger.info(f"Keywords: {keywords}")
 
-    result = await search_and_answer(keywords, job_id, table_json, sub_question, row_idx, col_idx, logger)
-
-    if result:
-        logger.info(f"Found answer: {result}")
-    else:
-        logger.info("No answer found for this cell")
-
-    return row_idx, col_idx, result
+    batch_size = 4
+    for i in range(0, len(keywords), batch_size):
+        batch = keywords[i:i+batch_size]
+        logger.info(f"Processing batch: {batch}")
+        
+        for search_term in batch:
+            result = await search_and_answer(search_term, job_id, table_json, sub_question, row_idx, col_idx, logger)
+            if result:
+                logger.info(f"Found answer: {result}")
+                return row_idx, col_idx, result
+        
+        logger.info(f"No answer found for batch: {batch}")
+    
+    logger.info("No answer found for this cell")
+    return row_idx, col_idx, ""
 
 async def process_empty_cells(user_input: str, table_json: dict, job_id: str, logger: logging.Logger, stop_flag) -> dict:
     logger.info("Processing empty cells in parallel")
