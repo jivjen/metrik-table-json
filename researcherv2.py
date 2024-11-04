@@ -188,16 +188,43 @@ async def search_and_answer(search_term, job_id, table, sub_question, row_idx, c
         
         for result in results:
             if result:
-                if not is_header:
                     # Update the table immediately
                     table["data"][row_idx][col_idx] = result
                     with FileLock(f"jobs/{job_id}/table.json.lock"):
                         with open(f"jobs/{job_id}/table.json", "w") as f:
                             json.dump(table, f, indent=2)
                     logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
-                return result
+                    return result
     
     logger.info(f"No answer found for keyword: {search_term}")
+    return ""
+
+def search_row_header(search_term, table, sub_question, logger: logging.Logger):
+    """Search the Web and obtain a list of web results."""
+    logger.info(f"Searching with keyword: {search_term}")
+    
+    google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
+    urls = []
+    search_chunk = {}
+    for result in google_search_result["items"]:
+        urls.append(result["link"])
+    for url in urls:
+        search_url = f'https://r.jina.ai/{url}'
+        headers = {
+            "Authorization": f"Bearer {JINA_API_KEY}"
+        }
+        try:
+            response = requests.get(search_url, headers=headers)
+            if response.status_code == 200:
+              search_result = response.text
+              answer = analyse_result(search_result, table, sub_question, url, logger=logger)
+              if answer != "":
+                logger.info(f"Answer found: {answer}")
+                return answer
+            else:
+                print(f"Jina returned an error: {response.status_code} for URL: {url}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching URL {url}: {str(e)}")
     return ""
 
 async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger: logging.Logger):
@@ -259,7 +286,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
     else:
         # Generate sub-question to find headers
         header_question = generate_row_header_subquestion(user_input, table_json, logger)
-        logger.info(f"Generated sub-question: {header_question}")
+        logger.info(f"Generated sub-question for row headers: {header_question}")
 
         # Generate keywords using existing function
         header_keywords = generate_keywords(user_input, header_question, logger)
@@ -267,7 +294,8 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
         # Search and analyze results using existing function
         for keyword in header_keywords:
             logger.info(f"Searching with keyword: {keyword}")
-            result = await search_and_answer(keyword, job_id, table_json, header_question, 0, 0, logger, True)
+            result = search_row_header(keyword, table_json, header_question, logger)
+            # result = await search_and_answer(keyword, job_id, table_json, header_question, 0, 0, logger, True)
 
             if result:
                 # Parse the result and update the table
@@ -295,6 +323,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
 
                 # Update the row headers in the headers object
                 entities = entities_response.choices[0].message.parsed.entities
+                logger.info(f"Row header entities: {entities}")
                 table_json["headers"]["rows"] = entities[:len(table_json["data"])]
                 break  # Exit after finding and updating headers
 
