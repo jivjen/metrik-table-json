@@ -478,21 +478,25 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
     async def process_cell_wrapper(row_idx: int, col_idx: int):
         if stop_flag():
             return row_idx, col_idx, "Stopped"
-        return await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger)
+        result = await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger)
+        if stop_flag():
+            return row_idx, col_idx, "Stopped"
+        return result
 
     tasks = [process_cell_wrapper(row_idx, col_idx) for row_idx, col_idx in empty_cells]
-    results = await asyncio.gather(*tasks)
+    
+    for task in asyncio.as_completed(tasks):
+        row_idx, col_idx, result = await task
+        if result == "Stopped" or stop_flag():
+            logger.info("Job stopped while processing cells")
+            return table_json
+        table_json["data"][row_idx][col_idx] = result
 
-    for row_idx, col_idx, result in results:
-        if result != "Stopped":
-            table_json["data"][row_idx][col_idx] = result
-
-    if stop_flag():
-        logger.info("Job stopped while processing cells")
-    else:
-        logger.info("Finished processing all cells")
-
+    logger.info("Finished processing all cells")
     return table_json
+
+def check_stop_signal(job_id: str):
+    return os.path.exists(f"jobs/{job_id}/stop_signal")
 
 def process_job(user_input: str, job_id: str, stop_flag):
     logger = setup_job_logger(job_id)
@@ -500,7 +504,7 @@ def process_job(user_input: str, job_id: str, stop_flag):
     
     # Generate table
     initial_table = generate_table(user_input, job_id, logger)
-    if stop_flag():
+    if stop_flag() or check_stop_signal(job_id):
         logger.info(f"Job {job_id} stopped after generating initial table")
         return initial_table
 
@@ -510,14 +514,14 @@ def process_job(user_input: str, job_id: str, stop_flag):
         with open(f"jobs/{job_id}/table.json", "w") as f:
             json.dump(updated_table, f, indent=2)
     logger.info(f"Updated table file with headers")
-    if stop_flag():
+    if stop_flag() or check_stop_signal(job_id):
         logger.info(f"Job {job_id} stopped after initializing row headers")
         return updated_table
 
     # Process empty cells in parallel
-    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, stop_flag))
+    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, lambda: stop_flag() or check_stop_signal(job_id)))
     
-    if stop_flag():
+    if stop_flag() or check_stop_signal(job_id):
         logger.info(f"Job {job_id} stopped during cell processing")
     else:
         logger.info(f"Job {job_id} completed")
@@ -531,5 +535,9 @@ def process_job(user_input: str, job_id: str, stop_flag):
     completed_table["headers"]["columns"].insert(0, "Entity")
     
     logger.info(f"Final table: {json.dumps(completed_table, indent=2)}")
+    
+    # Remove the stop signal file if it exists
+    if os.path.exists(f"jobs/{job_id}/stop_signal"):
+        os.remove(f"jobs/{job_id}/stop_signal")
     
     return completed_table

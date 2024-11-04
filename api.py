@@ -89,6 +89,10 @@ async def stop_job(job_id: str, job_statuses=Depends(get_job_statuses)):
     if job_statuses[job_id]["status"] in ["COMPLETED", "ERROR"]:
         return {"message": f"Job {job_id} has already finished"}
     
+    # Write a stop signal file
+    with open(f"jobs/{job_id}/stop_signal", "w") as f:
+        f.write("stop")
+    
     job_statuses[job_id]["stop_flag"] = True
     job_statuses[job_id]["status"] = "STOPPED"
     return {"message": f"Job {job_id} has been stopped"}
