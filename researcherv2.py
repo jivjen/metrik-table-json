@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from filelock import FileLock
 from multiprocessing import Event
 from dotenv import load_dotenv
+from duckduckgo_search import DDGS
 
 # Load environment variables
 load_dotenv()
@@ -25,6 +26,9 @@ google_search = build("customsearch", "v1", developerKey=GOOGLE_API_KEY).cse()
 
 JINA_API_KEY = os.getenv("JINA_API_KEY")
 openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Initialize DuckDuckGo search
+ddg = DDGS()
 
 def setup_job_logger(job_id: str):
     logger = logging.getLogger(f"job_{job_id}")
@@ -179,17 +183,19 @@ def generate_keywords(user_input: str, sub_question: str, logger: logging.Logger
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False, stop_flag=None):
+async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False, stop_flag=None, search_engine="duckduckgo"):
     """Search the Web and obtain a list of web results."""
-    logger.info(f"Searching with keyword: {search_term}")
+    logger.info(f"Searching with keyword: {search_term} using {search_engine}")
     
     if stop_flag and stop_flag():
         logger.info(f"Job {job_id} stopped during search_and_answer")
         return ""
     
     async with aiohttp.ClientSession() as session:
-        google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
-        urls = [result["link"] for result in google_search_result.get("items", [])]
+        if search_engine == "google":
+            urls = await google_search_urls(search_term)
+        else:  # Default to DuckDuckGo
+            urls = await duckduckgo_search_urls(search_term)
         
         for url in urls:
             if stop_flag and stop_flag():
@@ -201,6 +207,16 @@ async def search_and_answer(search_term, job_id, table, sub_question, row_idx, c
     
     logger.info(f"No answer found for keyword: {search_term}")
     return ""
+
+async def google_search_urls(search_term):
+    """Perform a Google search and return a list of URLs."""
+    google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
+    return [result["link"] for result in google_search_result.get("items", [])]
+
+async def duckduckgo_search_urls(search_term):
+    """Perform a DuckDuckGo search and return a list of URLs."""
+    results = ddg.text(search_term, max_results=10)
+    return [result['href'] for result in results]
 
 def search_row_header(search_term, table, sub_question, logger: logging.Logger):
     """Search the Web and obtain a list of web results."""
@@ -490,7 +506,7 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
                 logger.info(f"Job {job_id} stopped before search_and_answer")
                 return row_idx, col_idx, "Stopped"
 
-            result = await search_and_answer(search_term, job_id, table_json, sub_question, row_idx, col_idx, logger, stop_flag=stop_flag)
+            result = await search_and_answer(search_term, job_id, table_json, sub_question, row_idx, col_idx, logger, stop_flag=stop_flag, search_engine="duckduckgo")
             if result:
                 logger.info(f"Found answer: {result}")
                 return row_idx, col_idx, result
