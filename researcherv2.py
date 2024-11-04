@@ -448,7 +448,7 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger: logging.Logger, stop_flag) -> Tuple[int, int, str]:
+async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger: logging.Logger, stop_flag: Callable[[], bool]) -> Tuple[int, int, str]:
     try:
         row_header = table_json["headers"]["rows"][row_idx]
         col_header = table_json["headers"]["columns"][col_idx]
