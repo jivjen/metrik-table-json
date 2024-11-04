@@ -246,7 +246,7 @@ async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, 
         logger.error(f"Error fetching URL {url}: {str(e)}")
     return ""
 
-async def initialize_row_headers(user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> dict:
+def initialize_row_headers(user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> dict:
     logger.info("Initializing Row Headers")
 
     # First, determine if we need to find headers
@@ -499,16 +499,19 @@ def process_job(user_input: str, job_id: str, stop_flag):
     logger = setup_job_logger(job_id)
     logger.info(f"Starting job {job_id} with user input: {user_input}")
     
+    # Generate table
     initial_table = generate_table(user_input, job_id, logger)
     if stop_flag():
         logger.info(f"Job {job_id} stopped after generating initial table")
         return initial_table
 
-    updated_table = asyncio.run(initialize_row_headers(user_input, initial_table, job_id, logger))
+    # Initialize row headers
+    updated_table = initialize_row_headers(user_input, initial_table, job_id, logger)
     if stop_flag():
         logger.info(f"Job {job_id} stopped after initializing row headers")
         return updated_table
 
+    # Process empty cells in parallel
     completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, stop_flag))
     
     if stop_flag():
