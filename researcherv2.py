@@ -325,6 +325,7 @@ def initialize_row_headers(user_input: str, table_json: dict, job_id: str, logge
                 entities = entities_response.choices[0].message.parsed.entities
                 logger.info(f"Row header entities: {entities}")
                 table_json["headers"]["rows"] = entities[:len(table_json["data"])]
+                logger.info(f"Updated table: {table_json}")
                 break  # Exit after finding and updating headers
 
     return table_json
@@ -507,6 +508,10 @@ def process_job(user_input: str, job_id: str, stop_flag):
 
     # Initialize row headers
     updated_table = initialize_row_headers(user_input, initial_table, job_id, logger)
+    with FileLock(f"jobs/{job_id}/table.json.lock"):
+        with open(f"jobs/{job_id}/table.json", "w") as f:
+            json.dump(updated_table, f, indent=2)
+    logger.info(f"Updated table file with headers")
     if stop_flag():
         logger.info(f"Job {job_id} stopped after initializing row headers")
         return updated_table
