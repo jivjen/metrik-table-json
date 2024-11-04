@@ -11,6 +11,10 @@ from researcherv2 import process_job
 from threading import Event
 from datetime import datetime
 import signal
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI()
 

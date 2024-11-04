@@ -12,15 +12,19 @@ import tiktoken
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from filelock import FileLock
 from multiprocessing import Event
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 encoding = tiktoken.encoding_for_model("gpt-4o-mini")
-GOOGLE_API_KEY = "AIzaSyBiTmP3mKXTUb13BtpDivIDZ5X5KccFaqU"
-GOOGLE_CSE_ID = "82236a47a9b6e47e6"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 
 google_search = build("customsearch", "v1", developerKey=GOOGLE_API_KEY).cse()
 
-JINA_API_KEY="jina_cdfde91597854ce89ef3daed22947239autBdM5UrHeOgwRczhd1JYzs51OH"
-openai = OpenAI(api_key="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")
+JINA_API_KEY = os.getenv("JINA_API_KEY")
+openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def setup_job_logger(job_id: str):
     logger = logging.getLogger(f"job_{job_id}")
