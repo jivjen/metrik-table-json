@@ -179,7 +179,7 @@ async def search_and_answer(search_term, job_id, table, sub_question, row_idx, c
     """Search the Web and obtain a list of web results."""
     logger.info(f"Searching with keyword: {search_term}")
     
-    if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+    if stop_flag and stop_flag():
         logger.info(f"Job {job_id} stopped during search_and_answer")
         return ""
     
@@ -188,7 +188,7 @@ async def search_and_answer(search_term, job_id, table, sub_question, row_idx, c
         urls = [result["link"] for result in google_search_result.get("items", [])]
         
         for url in urls:
-            if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+            if stop_flag and stop_flag():
                 logger.info(f"Job {job_id} stopped during URL processing")
                 return ""
             result = await fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger, stop_flag)
@@ -230,13 +230,13 @@ async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, 
     search_url = f'https://r.jina.ai/{url}'
     headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
     try:
-        if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+        if stop_flag and stop_flag():
             logger.info(f"Job {job_id} stopped before fetching URL")
             return ""
         async with session.get(search_url, headers=headers, timeout=50) as response:
             if response.status == 200:
                 search_result = await response.text()
-                if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+                if stop_flag and stop_flag():
                     logger.info(f"Job {job_id} stopped after fetching URL")
                     return ""
                 answer = analyse_result(search_result, table, sub_question, url, logger)
