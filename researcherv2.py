@@ -183,27 +183,26 @@ async def search_and_answer(keywords, job_id, table, sub_question, row_idx, col_
         logger.info(f"Searching batch: {batch}")
         
         async with aiohttp.ClientSession() as session:
-            tasks = []
             for search_term in batch:
                 google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
                 urls = [result["link"] for result in google_search_result.get("items", [])]
-                tasks.extend([fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger) for url in urls])
-            
-            results = await asyncio.gather(*tasks)
+                tasks = [fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger) for url in urls]
+                
+                results = await asyncio.gather(*tasks)
+                
+                for result in results:
+                    if result and not is_header:
+                        # Update the table immediately
+                        table["data"][row_idx][col_idx] = result
+                        with FileLock(f"jobs/{job_id}/table.json.lock"):
+                            with open(f"jobs/{job_id}/table.json", "w") as f:
+                                json.dump(table, f, indent=2)
+                        logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
+                        return result
         
-        for result in results:
-            if result and not is_header:
-                # Update the table immediately
-                table["data"][row_idx][col_idx] = result
-                with FileLock(f"jobs/{job_id}/table.json.lock"):
-                    with open(f"jobs/{job_id}/table.json", "w") as f:
-                        json.dump(table, f, indent=2)
-                logger.info(f"Updated cell [{row_idx}, {col_idx}] with value: {result}")
-                return result
-        
-        if i + batch_size >= len(keywords):
-            logger.info(f"No answer found for all keywords")
+        logger.info(f"No answer found for batch: {batch}")
     
+    logger.info("No answer found for all keywords")
     return ""
 
 async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger: logging.Logger):
