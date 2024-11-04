@@ -175,7 +175,7 @@ def generate_keywords(user_input: str, sub_question: str, logger: logging.Logger
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger):
+async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False):
     """Search the Web and obtain a list of web results."""
     logger.info(f"Searching for: {search_term}")
     google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
@@ -186,7 +186,7 @@ async def search_and_answer(search_term, job_id, table, sub_question, row_idx, c
         results = await asyncio.gather(*tasks)
         
     for result in results:
-        if result:
+        if result and not is_header:
             # Update the table immediately
             table["data"][row_idx][col_idx] = result
             with FileLock(f"jobs/{job_id}/table.json.lock"):
@@ -265,7 +265,7 @@ async def initialize_row_headers(user_input: str, table_json: dict, job_id: str,
         # Search and analyze results using existing function
         for keyword in header_keywords:
             logger.info(f"Searching with keyword: {keyword}")
-            result = await search_and_answer(keyword, job_id, table_json, header_question, 0, 0, logger)
+            result = await search_and_answer(keyword, job_id, table_json, header_question, 0, 0, logger, True)
 
             if result:
                 # Parse the result and update the table
