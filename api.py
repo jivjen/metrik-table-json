@@ -100,14 +100,21 @@ async def stop_job(job_id: str, job_statuses=Depends(get_job_statuses)):
 def run_job(job_id: str, user_input: str, job_statuses):
     try:
         job_statuses[job_id]["status"] = "PROCESSING"
-        process_job(user_input, job_id, lambda: job_statuses[job_id]["stop_flag"])
-        if not job_statuses[job_id]["stop_flag"]:
+        def stop_flag():
+            return job_statuses[job_id]["stop_flag"] or os.path.exists(f"jobs/{job_id}/stop_signal")
+        process_job(user_input, job_id, stop_flag)
+        if not stop_flag():
             job_statuses[job_id]["status"] = "COMPLETED"
+        else:
+            job_statuses[job_id]["status"] = "STOPPED"
     except Exception as e:
         job_statuses[job_id]["status"] = "ERROR"
         logger.error(f"Error processing job {job_id}: {str(e)}", exc_info=True)
     finally:
         job_statuses[job_id]["end_time"] = datetime.now()
+        # Remove the stop signal file if it exists
+        if os.path.exists(f"jobs/{job_id}/stop_signal"):
+            os.remove(f"jobs/{job_id}/stop_signal")
 
 if __name__ == "__main__":
     freeze_support()

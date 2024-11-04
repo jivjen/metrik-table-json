@@ -175,16 +175,23 @@ def generate_keywords(user_input: str, sub_question: str, logger: logging.Logger
     logger.info(f"Generated keywords: {keywords}")
     return keywords
 
-async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False):
+async def search_and_answer(search_term, job_id, table, sub_question, row_idx, col_idx, logger: logging.Logger, is_header=False, stop_flag=None):
     """Search the Web and obtain a list of web results."""
     logger.info(f"Searching with keyword: {search_term}")
+    
+    if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+        logger.info(f"Job {job_id} stopped during search_and_answer")
+        return ""
     
     async with aiohttp.ClientSession() as session:
         google_search_result = google_search.list(q=search_term, cx=GOOGLE_CSE_ID).execute()
         urls = [result["link"] for result in google_search_result.get("items", [])]
         
         for url in urls:
-            result = await fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger)
+            if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+                logger.info(f"Job {job_id} stopped during URL processing")
+                return ""
+            result = await fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger, stop_flag)
             if result:
                 return result
     
@@ -219,13 +226,19 @@ def search_row_header(search_term, table, sub_question, logger: logging.Logger):
             print(f"Error fetching URL {url}: {str(e)}")
     return ""
 
-async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger: logging.Logger):
+async def fetch_and_analyze(session, url, table, sub_question, job_id, row_idx, col_idx, logger: logging.Logger, stop_flag=None):
     search_url = f'https://r.jina.ai/{url}'
     headers = {"Authorization": f"Bearer {JINA_API_KEY}"}
     try:
+        if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+            logger.info(f"Job {job_id} stopped before fetching URL")
+            return ""
         async with session.get(search_url, headers=headers, timeout=50) as response:
             if response.status == 200:
                 search_result = await response.text()
+                if stop_flag and (stop_flag() or check_stop_signal(job_id)):
+                    logger.info(f"Job {job_id} stopped after fetching URL")
+                    return ""
                 answer = analyse_result(search_result, table, sub_question, url, logger)
                 if answer:
                     logger.info(f"Answer found: {answer}")
@@ -435,7 +448,7 @@ def update_cell_value(table_json: dict, row_idx: int, col_idx: int, value: str) 
     table_json["data"][row_idx][col_idx] = value
     return table_json
 
-async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger: logging.Logger) -> Tuple[int, int, str]:
+async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: dict, job_id: str, logger: logging.Logger, stop_flag) -> Tuple[int, int, str]:
     try:
         row_header = table_json["headers"]["rows"][row_idx]
         col_header = table_json["headers"]["columns"][col_idx]
@@ -445,19 +458,35 @@ async def process_cell(row_idx: int, col_idx: int, user_input: str, table_json: 
 
     logger.info(f"Processing cell: {row_header} x {col_header}")
 
+    if stop_flag() or check_stop_signal(job_id):
+        logger.info(f"Job {job_id} stopped before generating sub-question")
+        return row_idx, col_idx, "Stopped"
+
     sub_question = generate_cell_subquestion(row_header, col_header, table_json, logger)
     logger.info(f"Generated sub-question: {sub_question}")
+
+    if stop_flag() or check_stop_signal(job_id):
+        logger.info(f"Job {job_id} stopped before generating keywords")
+        return row_idx, col_idx, "Stopped"
 
     keywords = generate_keywords(user_input, sub_question, logger)
     logger.info(f"Keywords: {keywords}")
 
     batch_size = 4
     for i in range(0, len(keywords), batch_size):
+        if stop_flag() or check_stop_signal(job_id):
+            logger.info(f"Job {job_id} stopped before processing batch")
+            return row_idx, col_idx, "Stopped"
+
         batch = keywords[i:i+batch_size]
         logger.info(f"Processing batch: {batch}")
         
         for search_term in batch:
-            result = await search_and_answer(search_term, job_id, table_json, sub_question, row_idx, col_idx, logger)
+            if stop_flag() or check_stop_signal(job_id):
+                logger.info(f"Job {job_id} stopped before search_and_answer")
+                return row_idx, col_idx, "Stopped"
+
+            result = await search_and_answer(search_term, job_id, table_json, sub_question, row_idx, col_idx, logger, stop_flag=stop_flag)
             if result:
                 logger.info(f"Found answer: {result}")
                 return row_idx, col_idx, result
@@ -502,9 +531,12 @@ def process_job(user_input: str, job_id: str, stop_flag):
     logger = setup_job_logger(job_id)
     logger.info(f"Starting job {job_id} with user input: {user_input}")
     
+    def check_stop():
+        return stop_flag() or check_stop_signal(job_id)
+    
     # Generate table
     initial_table = generate_table(user_input, job_id, logger)
-    if stop_flag() or check_stop_signal(job_id):
+    if check_stop():
         logger.info(f"Job {job_id} stopped after generating initial table")
         return initial_table
 
@@ -514,14 +546,14 @@ def process_job(user_input: str, job_id: str, stop_flag):
         with open(f"jobs/{job_id}/table.json", "w") as f:
             json.dump(updated_table, f, indent=2)
     logger.info(f"Updated table file with headers")
-    if stop_flag() or check_stop_signal(job_id):
+    if check_stop():
         logger.info(f"Job {job_id} stopped after initializing row headers")
         return updated_table
 
     # Process empty cells in parallel
-    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, lambda: stop_flag() or check_stop_signal(job_id)))
+    completed_table = asyncio.run(process_empty_cells(user_input, updated_table, job_id, logger, check_stop))
     
-    if stop_flag() or check_stop_signal(job_id):
+    if check_stop():
         logger.info(f"Job {job_id} stopped during cell processing")
     else:
         logger.info(f"Job {job_id} completed")
