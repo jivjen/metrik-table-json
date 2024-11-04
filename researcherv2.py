@@ -507,7 +507,7 @@ async def process_empty_cells(user_input: str, table_json: dict, job_id: str, lo
     async def process_cell_wrapper(row_idx: int, col_idx: int):
         if stop_flag():
             return row_idx, col_idx, "Stopped"
-        result = await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger)
+        result = await process_cell(row_idx, col_idx, user_input, table_json, job_id, logger, stop_flag)
         if stop_flag():
             return row_idx, col_idx, "Stopped"
         return result
